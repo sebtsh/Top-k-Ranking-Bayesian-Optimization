@@ -1,8 +1,13 @@
+"""
+Contains functions for the Predictive Entropy Search acquisition function.
+Formulation by Nguyen Quoc Phong.
+"""
+
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-def sample_maximizers(X, y, count, D, variance):
+def sample_maximizers(X, y, count, D, variance, num_steps=5000):
     """
     Samples from the posterior over the global maximizer using the method by Shah & Ghahramani (2015). Approximates
     the RBF kernel with its Fourier dual. Samples random Fourier features, constructs a linear model and computes
@@ -13,6 +18,7 @@ def sample_maximizers(X, y, count, D, variance):
     :param count: number of maximizers to sample
     :param D: number of Fourier features to use
     :param variance: #TODO: Set as same as kernel variance from SVGP?
+    :param num_steps: int that specifies how many optimization steps to take
     """
 
     d = X.shape[1]
