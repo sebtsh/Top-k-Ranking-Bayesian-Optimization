@@ -170,3 +170,31 @@ def I(chi, x_star, model):
     sum_over_preferred = np.sum(expected_log, axis=1)
 
     return np.sum(p_x_star_cond * sum_over_preferred)
+
+
+def sample_inputs(current_inputs, num_samples, num_choices, min_val=0.0, max_val=1.0):
+    """
+    Uniformly samples random inputs to query objective function. Sampled inputs must have
+    existing data points among the choices, otherwise the learned function values for the
+    input choices will be independent of the already learned function values for other data points.
+    Returns np array of shape (num_samples*num_inputs, num_choices, input_dims)
+    :param current_inputs: np array of shape (num_inputs, input_dims)
+    :param num_samples: int, number of random values to permutate with existing inputs
+    :param num_choices: int, number of choices in an input query
+    :param min_val: float, minimum value of sampled random values
+    :param max_val: float, max value of sampled random values
+    """
+    num_inputs = current_inputs.shape[0]
+    input_dims = current_inputs.shape[1]
+    samples = np.zeros([num_samples * num_inputs, num_choices, input_dims])
+    uniform_samples = np.random.uniform(low=min_val,
+                                        high=max_val,
+                                        size=(num_samples, num_choices - 1, input_dims))
+
+    for i in range(num_inputs):
+        for j in range(num_samples):
+            cur_idx = i * num_samples + j
+            samples[cur_idx, 0, :] = current_inputs[i]
+            samples[cur_idx, 1:, :] = uniform_samples[j]
+
+    return samples

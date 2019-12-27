@@ -8,6 +8,8 @@ Formulation by Nguyen Quoc Phong.
 
 import numpy as np
 import tensorflow as tf
+import gpflow
+from gpflow.utilities import set_trainable
 
 def kl_divergence(p_mu, p_var, q_mu, q_var):
     """
@@ -121,7 +123,39 @@ def train_model(X, y, num_steps=5000):
     optimizer = tf.keras.optimizers.Adam()
     for i in range(num_steps):
         optimizer.minimize(neg_elbo, var_list=[q_mu, q_var])
+        if i % 200 == 0:
+            print('Negative ELBO at step %s: %s' % (i, neg_elbo().numpy()))
 
     inputs = np.array([idx_to_val_dict[i] for i in range(q_mu.numpy().shape[0])])
 
     return q_mu, q_var, inputs
+
+
+def init_SVGP(q_mu, q_var, inputs, kernel, likelihood):
+    """
+    Returns a gpflow SVGP model using the values obtained from train_model.
+    :param q_mu: np array or tensor of shape (num_inputs)
+    :param q_var: np array or tensor of shape (num_inputs)
+    :param inputs: np array or tensor of shape (num_inputs, input_dims)
+    :param kernel: gpflow kernel
+    :param likelihood: gpflow likelihood
+    """
+
+    model = gpflow.models.SVGP(kernel=kernel,
+                               likelihood=likelihood,
+                               inducing_variable=inputs)
+
+    mu_vals = np.expand_dims(q_mu.numpy(), 1)
+    model.q_mu.assign(mu_vals)
+
+    # Transform q_var into diagonal matrix
+    q_sqrt = np.sqrt(np.identity(len(q_var.numpy())) * np.outer(np.ones(len(q_var.numpy())), q_var.numpy()))
+    model.q_sqrt.assign(np.expand_dims(q_sqrt, 0))
+
+    # Set so that the parameters learned do not change if further optimization over
+    # other parameters is performed
+    set_trainable(model.q_mu, False)
+    set_trainable(model.q_sqrt, False)
+    set_trainable(model.inducing_variable.Z, False)
+
+    return model
