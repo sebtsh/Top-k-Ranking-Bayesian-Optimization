@@ -91,10 +91,12 @@ def sample_maximizers(X, y, count, D, variance, num_steps=5000):
     x_star_latent = tf.Variable(tf.random.normal(shape=(count, 1, d), dtype=tf.dtypes.float64))
     loss = lambda: construct_maximizer_objective(x_star_latent, W, theta)
 
-    for i in range(10000):
+    for i in range(num_steps):
         optimizer.minimize(loss, var_list=[x_star_latent])
+        # if i % 200 == 0:
+        #     print('Loss at step %s: %s' % (i, loss().numpy()))
 
-    return tf.squeeze(tf.sigmoid(x_star_latent))
+    return tf.squeeze(tf.sigmoid(x_star_latent), axis=1)
 
 
 def p_x_star_cond_D(x_star, model, num_samples=1000):
@@ -109,10 +111,10 @@ def p_x_star_cond_D(x_star, model, num_samples=1000):
 
     samples = np.squeeze(model.predict_f_samples(x_star, num_samples))  # (num_samples, num_max)
     samples_argmax = np.argmax(samples, 1)  # (num_samples)
-    count = np.zeros(num_max)
+    count = np.ones(num_max) # Start all at one so we avoid dividing by zero later on
     for i in range(num_samples):
         count[samples_argmax[i]] += 1
-    return count / num_samples
+    return count / (num_samples + num_max)
 
 def z_likelihood(z, f_z):
     """
@@ -139,11 +141,11 @@ def p_z_cond_D_x_star(z, x_star, p_x_star_cond, model, num_samples=1000):
     samples = np.squeeze(model.predict_f_samples(x_vals, num_samples))  # (num_samples, num_max + num_choices)
     samples_x_star = samples[:, :num_max]  # (num_samples, num_max)
     samples_x_star_argmax = np.argmax(samples_x_star, 1)  # (num_samples)
-    p_z_cond_f_z = np.zeros(num_max)  # Compute expectation by sampling
+    p_z_cond_f_z = np.ones(num_max)  # Compute expectation by sampling
     for i in range(num_samples):
-        p_z_cond_f_z[samples_x_star_argmax[i]] += z_likelihood(z, samples[i][num_max:]) / num_samples
+        p_z_cond_f_z[samples_x_star_argmax[i]] += z_likelihood(z, samples[i][num_max:])
 
-    return (1. / p_x_star_cond) * p_z_cond_f_z
+    return (1. / p_x_star_cond) * (p_z_cond_f_z / (num_samples + num_max))
 
 
 def I(chi, x_star, model):
@@ -151,7 +153,6 @@ def I(chi, x_star, model):
     Predictive Entropy Search acquisition function.
     :param chi: input points in a query, tensor of shape (num_choices, d)
     :param x_star: possible maximizers, tensor of shape (num_max, d)
-    :param p_x_star_cond_D: tensor of shape (num_max)
     :param model: GPflow model
     """
 
@@ -171,6 +172,13 @@ def I(chi, x_star, model):
 
     return np.sum(p_x_star_cond * sum_over_preferred)
 
+def I_batch(chi_batch, x_star, model):
+    """
+    :param chi_batch: input points in a query, tensor of shape (num_queries, num_choices, d)
+    :param x_star: possible maximizers, tensor of shape (num_max, d)
+    :param model: GPflow model
+    """
+    return np.array([I(chi, x_star, model) for chi in chi_batch])
 
 def sample_inputs(current_inputs, num_samples, num_choices, min_val=0.0, max_val=1.0):
     """

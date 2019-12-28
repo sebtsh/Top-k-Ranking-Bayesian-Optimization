@@ -123,7 +123,7 @@ def train_model(X, y, num_steps=5000):
     optimizer = tf.keras.optimizers.Adam()
     for i in range(num_steps):
         optimizer.minimize(neg_elbo, var_list=[q_mu, q_var])
-        if i % 200 == 0:
+        if i % 500 == 0:
             print('Negative ELBO at step %s: %s' % (i, neg_elbo().numpy()))
 
     inputs = np.array([idx_to_val_dict[i] for i in range(q_mu.numpy().shape[0])])
