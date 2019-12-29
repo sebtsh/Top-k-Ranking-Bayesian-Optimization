@@ -123,7 +123,7 @@ def z_likelihood(z, f_z):
     :param f_z: tensor of shape (num_choices) with f values corresponding to chi
     """
     x = z[0]
-    return np.exp(f_z[x])/np.sum(tf.exp(f_z))
+    return np.exp(f_z[x])/np.sum(np.exp(f_z))
 
 
 def p_z_cond_D_x_star(z, x_star, p_x_star_cond, model, num_samples=1000):
