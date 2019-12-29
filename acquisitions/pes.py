@@ -109,21 +109,21 @@ def p_x_star_cond_D(x_star, model, num_samples=1000):
     """
     num_max = x_star.shape[0]
 
-    samples = np.squeeze(model.predict_f_samples(x_star, num_samples))  # (num_samples, num_max)
-    samples_argmax = np.argmax(samples, 1)  # (num_samples)
-    count = np.ones(num_max) # Start all at one so we avoid dividing by zero later on
-    for i in range(num_samples):
-        count[samples_argmax[i]] += 1
-    return count / (num_samples + num_max)
+    samples = tf.squeeze(model.predict_f_samples(x_star, num_samples))  # (num_samples, num_max)
+    samples_argmax = tf.argmax(samples, 1, output_type=tf.int32)  # (num_samples)
+    count = tf.zeros(num_max, dtype=tf.float64) + tf.keras.backend.epsilon()  # Start all at one so we avoid dividing by zero later on
+    count += tf.math.bincount(samples_argmax, minlength=num_max, dtype=tf.float64)
+    return count / num_samples
 
 def z_likelihood(z, f_z):
     """
+    Returns a tensor of shape (num_samples)
     :param z: tuple of the form (x, chi) where chi is a tensor of shape (num_choices, d) and x is an index to
     the most preferred input in chi
-    :param f_z: tensor of shape (num_choices) with f values corresponding to chi
+    :param f_z: tensor of shape (num_samples, num_choices) with f values corresponding to chi
     """
     x = z[0]
-    return np.exp(f_z[x])/np.sum(np.exp(f_z))
+    return tf.exp(f_z[:, x]) / tf.reduce_sum(tf.exp(f_z), axis=1)
 
 
 def p_z_cond_D_x_star(z, x_star, p_x_star_cond, model, num_samples=1000):
@@ -137,15 +137,16 @@ def p_z_cond_D_x_star(z, x_star, p_x_star_cond, model, num_samples=1000):
     """
     num_max = x_star.shape[0]
 
-    x_vals = np.concatenate([x_star, z[1]], 0)  # f(x_star), f(z)
-    samples = np.squeeze(model.predict_f_samples(x_vals, num_samples))  # (num_samples, num_max + num_choices)
+    x_vals = tf.concat([x_star, z[1]], 0)  # f(x_star), f(z)
+    samples = tf.squeeze(model.predict_f_samples(x_vals, num_samples))  # (num_samples, num_max + num_choices)
     samples_x_star = samples[:, :num_max]  # (num_samples, num_max)
-    samples_x_star_argmax = np.argmax(samples_x_star, 1)  # (num_samples)
-    p_z_cond_f_z = np.ones(num_max)  # Compute expectation by sampling
-    for i in range(num_samples):
-        p_z_cond_f_z[samples_x_star_argmax[i]] += z_likelihood(z, samples[i][num_max:])
+    samples_x_star_argmax = tf.argmax(samples_x_star, 1, output_type=tf.int32)  # (num_samples)
 
-    return (1. / p_x_star_cond) * (p_z_cond_f_z / (num_samples + num_max))
+    p_z_cond_f_z = tf.scatter_nd(indices=tf.expand_dims(samples_x_star_argmax, axis=1),
+                                 updates=z_likelihood(z, samples[:, num_max:]),
+                                 shape=tf.constant([num_max])) + tf.keras.backend.epsilon()
+
+    return (1. / p_x_star_cond) * (p_z_cond_f_z / num_samples)
 
 
 def I(chi, x_star, model):
@@ -161,16 +162,18 @@ def I(chi, x_star, model):
 
     p_x_star_cond = p_x_star_cond_D(x_star, model)  # (num_max)
 
-    expected_log = np.zeros((num_max, num_choices))  # p(z|D,x_star)*log((p|D,x_star)/p(z|D))
+    expected_log = tf.Variable(initial_value=tf.zeros((num_max, num_choices), dtype=tf.float64),
+                               dtype=tf.float64,
+                               shape=(num_max, num_choices))  # p(z|D,x_star)*log((p|D,x_star)/p(z|D))
     for i in range(num_choices):
         z = (i, chi)
         p_z_cond = p_z_cond_D_x_star(z, x_star, p_x_star_cond, model)
-        norm_constant = np.sum(p_x_star_cond * p_z_cond)
-        expected_log[:, i] = p_z_cond * np.log(p_z_cond / norm_constant)
+        norm_constant = tf.reduce_sum(p_x_star_cond * p_z_cond)
+        expected_log[:, i].assign(p_z_cond * tf.math.log(p_z_cond / norm_constant))
 
-    sum_over_preferred = np.sum(expected_log, axis=1)
+    sum_over_preferred = tf.reduce_sum(expected_log, axis=1)
 
-    return np.sum(p_x_star_cond * sum_over_preferred)
+    return tf.reduce_sum(p_x_star_cond * sum_over_preferred)
 
 def I_batch(chi_batch, x_star, model):
     """
