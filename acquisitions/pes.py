@@ -98,7 +98,7 @@ def sample_maximizers(X, y, count, D, variance, num_steps=5000):
 
     return tf.squeeze(tf.sigmoid(x_star_latent), axis=1)
 
-
+@tf.function
 def p_x_star_cond_D(x_star, model, num_samples=1000):
     """
     Among possible maximizers of the function, calculates the probability that each is the global maximizer.
@@ -115,6 +115,7 @@ def p_x_star_cond_D(x_star, model, num_samples=1000):
     count += tf.math.bincount(samples_argmax, minlength=num_max, dtype=tf.float64)
     return count / num_samples
 
+@tf.function
 def z_likelihood(z, f_z):
     """
     Returns a tensor of shape (num_samples)
@@ -125,7 +126,7 @@ def z_likelihood(z, f_z):
     x = z[0]
     return tf.exp(f_z[:, x]) / tf.reduce_sum(tf.exp(f_z), axis=1)
 
-
+@tf.function
 def p_z_cond_D_x_star(z, x_star, p_x_star_cond, model, num_samples=1000):
     """
     Returns a tensor of shape (num_max)
@@ -175,6 +176,7 @@ def I(chi, x_star, model):
 
     return tf.reduce_sum(p_x_star_cond * sum_over_preferred)
 
+
 def I_batch(chi_batch, x_star, model):
     """
     :param chi_batch: input points in a query, tensor of shape (num_queries, num_choices, d)
@@ -182,6 +184,7 @@ def I_batch(chi_batch, x_star, model):
     :param model: GPflow model
     """
     return np.array([I(chi, x_star, model) for chi in chi_batch])
+
 
 def sample_inputs(current_inputs, num_samples, num_choices, min_val=0.0, max_val=1.0):
     """
@@ -208,4 +211,4 @@ def sample_inputs(current_inputs, num_samples, num_choices, min_val=0.0, max_val
             samples[cur_idx, 0, :] = current_inputs[i]
             samples[cur_idx, 1:, :] = uniform_samples[j]
 
-    return samples
+    return tf.constant(samples)

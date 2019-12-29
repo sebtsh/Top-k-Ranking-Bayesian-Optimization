@@ -11,6 +11,7 @@ import tensorflow as tf
 import gpflow
 from gpflow.utilities import set_trainable
 
+
 def kl_divergence(p_mu, p_var, q_mu, q_var):
     """
     Calculates the KL divergence of Q from P, where Q and P are univariate Gaussian distributions.
@@ -24,6 +25,7 @@ def kl_divergence(p_mu, p_var, q_mu, q_var):
         Variance of Q.
     """
     return tf.reduce_sum(0.5 * tf.math.log(q_var / p_var) + (p_var + tf.square(p_mu - q_mu)) / (2. * q_var) - 0.5)
+
 
 def variational_expectations(q_mu, q_var, D_idxs, max_idxs):
     """
@@ -46,6 +48,7 @@ def variational_expectations(q_mu, q_var, D_idxs, max_idxs):
                                             + 0.5 * tf.gather_nd(q_var, D_idxs)
                                            ), axis=1) ) )
 
+@tf.function
 def elbo(p_mu, p_var, q_mu, q_var, D_idxs, max_idxs):
     """
     Calculates the ELBO for the PBO formulation.
