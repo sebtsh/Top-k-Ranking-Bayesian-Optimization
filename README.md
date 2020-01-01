@@ -1,6 +1,6 @@
 # Preferential Bayesian Optimization
 
-##Setup
+## Setup
 This package and the notebooks require TensorFlow 2 and GPflow 2. The easiest way to
 set up the environment is through the Docker image at sebtsh/gpflow2:
 
