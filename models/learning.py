@@ -142,11 +142,11 @@ def train_model(X, y, num_steps=5000):
 
     n = len(val_to_idx_dict.keys())
     # Assume prior of mean 0 and covariance 1 for each input point
-    p_mu = tf.Variable(np.zeros(n), name="p_mu", dtype=tf.float64)
-    p_var = tf.Variable(np.ones(n), name="p_var", dtype=tf.float64)
+    p_mu = tf.Variable(np.zeros(n), dtype=tf.float64)
+    p_var = tf.Variable(np.ones(n), dtype=tf.float64)
     # Initialize variational parameters
-    q_mu = tf.Variable(np.zeros(n), name="q_mu", dtype=tf.float64)
-    q_var = tf.Variable(np.ones(n), name="q_var", dtype=tf.float64)
+    q_mu = tf.Variable(np.zeros(n), dtype=tf.float64)
+    q_var = tf.Variable(np.ones(n), dtype=tf.float64)
 
     neg_elbo = lambda: -elbo(p_mu, p_var, q_mu, q_var, D_idxs, max_idxs)
     optimizer = tf.keras.optimizers.Adam()
