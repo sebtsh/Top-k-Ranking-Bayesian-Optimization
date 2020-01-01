@@ -11,6 +11,7 @@ import tensorflow as tf
 import gpflow
 from gpflow.utilities import set_trainable
 
+
 def kl_divergence(p_mu, p_var, q_mu, q_var):
     """
     Calculates the KL divergence of Q from P, where Q and P are univariate Gaussian distributions.
@@ -25,32 +26,59 @@ def kl_divergence(p_mu, p_var, q_mu, q_var):
     """
     return tf.reduce_sum(0.5 * tf.math.log(q_var / p_var) + (p_var + tf.square(p_mu - q_mu)) / (2. * q_var) - 0.5)
 
+
 def variational_expectations(q_mu, q_var, D_idxs, max_idxs):
     """
     Calculates
         \int q(f) (\log p(D|f)) df
     for the PBO formulation.
     :param q_mu:
-        Mean of variational distribution Q.
+        Mean of variational distribution Q. Tensor with shape (num_data)
     :param q_var:
-        Variance of variational distribution Q.
+        Variance of variational distribution Q. Tensor with shape (num_data)
     :param D_idxs: tensor with shape (num_data, num_choices, 1)
         Input data points, that are indices into q_mu and q_var for tf.gather_nd
     :param max_idxs: tensor with shape (num_data, 1)
         Selection of most preferred input point for each collection of data points, that are indices into
         q_mu and q_var
     """
-    return tf.reduce_sum( tf.gather_nd(q_mu, max_idxs)
-                           - tf.math.log( tf.reduce_sum( tf.exp(
+    return tf.reduce_sum(tf.gather_nd(q_mu, max_idxs)
+                           - tf.math.log(tf.reduce_sum(tf.exp(
                                             tf.gather_nd(q_mu, D_idxs)
                                             + 0.5 * tf.gather_nd(q_var, D_idxs)
                                            ), axis=1) ) )
+
 
 def elbo(p_mu, p_var, q_mu, q_var, D_idxs, max_idxs):
     """
     Calculates the ELBO for the PBO formulation.
     """
     return variational_expectations(q_mu, q_var, D_idxs, max_idxs) - kl_divergence(q_mu, q_var, p_mu, p_var)
+
+
+def elbo_fullcov(q_mu, q_sqrt_latent, D_idxs, max_idxs, kernel, inputs):
+    """
+    Calculates the ELBO for the PBO formulation, using a full covariance matrix.
+    :param q_mu: tensor with shape (num_data, 1)
+    :param q_sqrt_latent: tensor with shape (1, num_data, num_data). Will be forced into lower triangular matrix such
+    that q_sqrt @ q_sqrt^T represents the covariance matrix of X
+    :param D_idxs: tensor with shape (num_data, num_choices, 1)
+        Input data points, that are indices into q_mu and q_var for tf.gather_nd
+    :param max_idxs: tensor with shape (num_data, 1)
+        Selection of most preferred input point for each collection of data points, that are indices into
+        q_mu and q_var
+    :param kernel: gpflow kernel to calculate covariance matrix for KL divergence
+    :param inputs: tensor of shape (num_data, input_dims) with indices corresponding to that of D_idxs and max_idxs
+    """
+    q_sqrt = tf.linalg.band_part(q_sqrt_latent, -1, 0) # Force into lower triangular
+    q_sqrt_squeezed = tf.squeeze(q_sqrt, axis=0)
+    q_full = q_sqrt_squeezed @ tf.transpose(q_sqrt_squeezed)
+    q_diag = tf.linalg.diag_part(q_full)
+
+    cov_mat = kernel.K(inputs)
+
+    return variational_expectations(tf.squeeze(q_mu, axis=1), q_diag, D_idxs, max_idxs) \
+           - gpflow.kullback_leiblers.gauss_kl(q_mu, q_sqrt, cov_mat)
 
 
 def populate_dicts(D_vals):
@@ -98,6 +126,7 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
 
     return tf.constant(D_idxs), tf.constant(max_idxs)
 
+
 def train_model(X, y, num_steps=5000):
     """
     Returns variational parameters q_mu and q_var (model's learned approximations of the distributions of
@@ -126,9 +155,34 @@ def train_model(X, y, num_steps=5000):
         if i % 500 == 0:
             print('Negative ELBO at step %s: %s' % (i, neg_elbo().numpy()))
 
-    inputs = np.array([idx_to_val_dict[i] for i in range(q_mu.numpy().shape[0])])
+    inputs = np.array([idx_to_val_dict[i] for i in range(n)])
 
     return q_mu, q_var, inputs
+
+
+def train_model_fullcov(X, y, num_steps=5000):
+    idx_to_val_dict, val_to_idx_dict = populate_dicts(X)
+    D_idxs, max_idxs = val_to_idx(X, y, val_to_idx_dict)
+
+    n = len(val_to_idx_dict.keys())
+    inputs = np.array([idx_to_val_dict[i] for i in range(n)])
+
+    # Initialize variational parameters
+    q_mu = tf.Variable(np.zeros([n, 1]), name="q_mu", dtype=tf.float64)
+    q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(n), axis=0), name="q_sqrt_latent", dtype=tf.float64)
+    kernel = gpflow.kernels.RBF()
+
+    neg_elbo = lambda: -elbo_fullcov(q_mu, q_sqrt_latent, D_idxs, max_idxs,
+                                     kernel=kernel,
+                                     inputs=inputs)
+    optimizer = tf.keras.optimizers.Adam()
+    trainable_vars = [q_mu, q_sqrt_latent] + list(kernel.trainable_variables)
+    for i in range(num_steps):
+        optimizer.minimize(neg_elbo, var_list=trainable_vars)
+        if i % 500 == 0:
+            print('Negative ELBO at step %s: %s' % (i, neg_elbo().numpy()))
+
+    return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), inputs, kernel # q_mu and q_sqrt
 
 
 def init_SVGP(q_mu, q_var, inputs, kernel, likelihood):
