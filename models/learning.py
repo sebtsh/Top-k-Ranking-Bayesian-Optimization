@@ -171,6 +171,7 @@ def train_model_fullcov(X, y, num_steps=5000):
     q_mu = tf.Variable(np.zeros([n, 1]), name="q_mu", dtype=tf.float64)
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(n), axis=0), name="q_sqrt_latent", dtype=tf.float64)
     kernel = gpflow.kernels.RBF()
+    kernel.lengthscale.assign(0.1)
 
     neg_elbo = lambda: -elbo_fullcov(q_mu, q_sqrt_latent, D_idxs, max_idxs,
                                      kernel=kernel,
@@ -205,6 +206,31 @@ def init_SVGP(q_mu, q_var, inputs, kernel, likelihood):
     # Transform q_var into diagonal matrix
     q_sqrt = np.sqrt(np.identity(len(q_var.numpy())) * np.outer(np.ones(len(q_var.numpy())), q_var.numpy()))
     model.q_sqrt.assign(np.expand_dims(q_sqrt, 0))
+
+    # Set so that the parameters learned do not change if further optimization over
+    # other parameters is performed
+    set_trainable(model.q_mu, False)
+    set_trainable(model.q_sqrt, False)
+    set_trainable(model.inducing_variable.Z, False)
+
+    return model
+
+def init_SVGP_fullcov(q_mu, q_sqrt, inputs, kernel, likelihood):
+    """
+    Returns a gpflow SVGP model using the values obtained from train_model.
+    :param q_mu: np array or tensor of shape (num_inputs, 1)
+    :param q_sqrt: np array or tensor of shape (num_inputs, num_inputs). Lower triangular matrix
+    :param inputs: np array or tensor of shape (num_inputs, input_dims)
+    :param kernel: gpflow kernel
+    :param likelihood: gpflow likelihood
+    """
+
+    model = gpflow.models.SVGP(kernel=kernel,
+                               likelihood=likelihood,
+                               inducing_variable=inputs)
+
+    model.q_mu.assign(q_mu)
+    model.q_sqrt.assign(q_sqrt)
 
     # Set so that the parameters learned do not change if further optimization over
     # other parameters is performed

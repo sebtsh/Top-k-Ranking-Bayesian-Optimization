@@ -7,6 +7,22 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+
+def sample_maximizers_simple(model, count, num_discrete_points):
+    """
+    Samples maximizers from the GP by sampling real values at each discrete point and finding the argmax
+    :param model: gpflow model
+    :param count: number of maximizers
+    :param num_discrete_points: number of discrete points over input space to sample
+    :return: tensor of shape (count, 1)
+    """
+
+    xx = np.linspace(0.0, 1.0, num_discrete_points).reshape(num_discrete_points, 1)
+    samples = model.predict_f_samples(xx, count) # (count, num_discrete_points)
+    samples_argmax = np.squeeze(np.argmax(samples, axis=1), axis=1)
+    return np.expand_dims(np.take(xx, samples_argmax), axis=1)
+
+
 def sample_maximizers(X, y, count, D, variance, num_steps=5000):
     """
     Samples from the posterior over the global maximizer using the method by Shah & Ghahramani (2015). Approximates
