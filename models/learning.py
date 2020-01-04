@@ -171,7 +171,7 @@ def train_model_fullcov(X, y, num_steps=5000):
     q_mu = tf.Variable(np.zeros([n, 1]), name="q_mu", dtype=tf.float64)
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(n), axis=0), name="q_sqrt_latent", dtype=tf.float64)
     kernel = gpflow.kernels.RBF()
-    kernel.lengthscale.assign(0.1)
+    kernel.lengthscale.assign(0.05)
 
     neg_elbo = lambda: -elbo_fullcov(q_mu, q_sqrt_latent, D_idxs, max_idxs,
                                      kernel=kernel,
