@@ -8,6 +8,7 @@ Formulation by Nguyen Quoc Phong.
 
 import numpy as np
 import tensorflow as tf
+import tensorflow_probability as tfp
 import gpflow
 from gpflow.utilities import set_trainable
 
@@ -81,12 +82,38 @@ def elbo_fullcov(q_mu, q_sqrt_latent, D_idxs, max_idxs, kernel, inputs):
            - gpflow.kullback_leiblers.gauss_kl(q_mu, q_sqrt, cov_mat)
 
 
+def cholesky_matrix_inverse(A):
+    """
+    :param A: Symmetric positive-definite matrix, tensor of shape (n, n)
+    :return: Inverse of A, tensor of shape (n, n)
+    """
+    L = tf.linalg.cholesky(A)
+    L_inv = tf.linalg.triangular_solve(L, tf.eye(A.shape[0], dtype=tf.float64))
+    return tf.linalg.matrix_transpose(L_inv) @ L_inv
+
+
+def multivariate_normal_log_pdf(mean, covariance, x):
+    """
+    Calculates the log probability density of the point x in the multivariate normal distribution specified.
+    :param mean: tensor of shape (n)
+    :param covariance: tensor of shape (n, n)
+    :param x: tensor of shape (n)
+    :return: scalar
+    """
+
+    mahalanobis_squared = tf.squeeze(tf.expand_dims(x - mean, axis=0) @
+                                     cholesky_matrix_inverse(covariance) @
+                                     tf.expand_dims(x - mean, axis=1))
+    return -0.5 * (mahalanobis_squared + tf.cast(x.shape[0] * tf.math.log(2 * np.pi), dtype=tf.float64) +
+                   tf.linalg.logdet(covariance))
+
+
 def q_joint_f_u(q_mu, q_sqrt_latent, inducing_variables, kernel, inputs):
     """
     Calculates the mean and covariance of the joint distribution q(f, u). Has form [f; u] where values corresponding
     to f values are before u values
-    :param q_mu: tensor with shape (num_data, 1)
-    :param q_sqrt_latent: tensor with shape (1, num_data, num_data). Will be forced into lower triangular matrix such
+    :param q_mu: tensor with shape (num_inducing, 1)
+    :param q_sqrt_latent: tensor with shape (1, num_inducing, num_inducing). Will be forced into lower triangular matrix such
     that q_sqrt @ q_sqrt^T represents the covariance matrix of inducing variables
     :param inducing_variables: tensor with shape (num_inducing, input_dims)
     :param kernel: gpflow kernel to calculate covariance matrix for KL divergence
@@ -100,9 +127,7 @@ def q_joint_f_u(q_mu, q_sqrt_latent, inducing_variables, kernel, inputs):
     q_full = q_sqrt @ tf.linalg.matrix_transpose(q_sqrt)  # (1, num_data, num_data)
 
     Kmm = kernel.K(inducing_variables)  # (m, m)
-    Lmm = tf.linalg.cholesky(Kmm)
-    Lmm_inv = tf.linalg.triangular_solve(Lmm, tf.eye(m, dtype=tf.float64))
-    Kmm_inv = tf.linalg.matrix_transpose(Lmm_inv) @ Lmm_inv
+    Kmm_inv = cholesky_matrix_inverse(Kmm)
 
     Knm = kernel.K(inputs, inducing_variables)  # (n, m)
     A = Knm @ Kmm_inv  # (n, m)
@@ -125,8 +150,8 @@ def q_joint_f_u(q_mu, q_sqrt_latent, inducing_variables, kernel, inputs):
 def elbo_inducing_variables(q_mu, q_sqrt_latent, inducing_variables, D_idxs, max_idxs, kernel, inputs):
     """
     Calculates the ELBO for the PBO formulation, using a full covariance matrix and inducing variables.
-    :param q_mu: tensor with shape (num_data, 1)
-    :param q_sqrt_latent: tensor with shape (1, num_data, num_data). Will be forced into lower triangular matrix such
+    :param q_mu: tensor with shape (num_inducing, 1)
+    :param q_sqrt_latent: tensor with shape (1, num_inducing, num_inducing). Will be forced into lower triangular matrix such
     that q_sqrt @ q_sqrt^T represents the covariance matrix of inducing variables
     :param inducing_variables: tensor with shape (num_inducing, input_dims)
     :param D_idxs: tensor with shape (num_data, num_choices, 1)
@@ -138,7 +163,25 @@ def elbo_inducing_variables(q_mu, q_sqrt_latent, inducing_variables, D_idxs, max
     :param inputs: tensor of shape (num_data, input_dims) with indices corresponding to that of D_idxs and max_idxs
     :return: tensor of shape ()
     """
+
+    def log_likelihood_minus_KL(f_u):
+        """
+        Term that we calculate the expectation over the joint distribution q(f, u) for. Integrand for quadrature
+        method
+        """
+
+        q_u_mean = tf.squeeze(q_mu, axis=-1)  # (num_inducing)
+        q_sqrt = tf.linalg.band_part(q_sqrt_latent, -1, 0)  # Force into lower triangular
+        q_u_cov = tf.squeeze(q_sqrt @ tf.linalg.matrix_transpose(q_sqrt), axis=0)  # (num_inducing, num_inducing)
+        
+        return
+
+
     f_u_mean, f_u_cov = q_joint_f_u(q_mu, q_sqrt_latent, inducing_variables, kernel, inputs)
+
+
+
+
 
 
 def populate_dicts(D_vals):
