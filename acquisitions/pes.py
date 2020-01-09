@@ -114,6 +114,19 @@ def sample_maximizers(X, y, count, D, variance, num_steps=5000):
 
     return tf.squeeze(tf.sigmoid(x_star_latent), axis=1)
 
+
+@tf.function
+def samples_likelihood(z, f_z):
+    """
+    :param z: tuple of the form (x, chi) where chi is a tensor of shape (num_choices, d) and x is an index to
+    the most preferred input in chi
+    :param f_z: tensor of shape (num_samples, num_choices) with f values corresponding to chi
+    :return: tensor of shape (num_samples)
+    """
+    x = z[0]
+    return tf.exp(f_z[:, x]) / tf.reduce_sum(tf.exp(f_z), axis=1)
+
+
 @tf.function
 def p_x_star_cond_D(x_star, model, num_samples=1000):
     """
@@ -131,16 +144,6 @@ def p_x_star_cond_D(x_star, model, num_samples=1000):
     count += tf.math.bincount(samples_argmax, minlength=num_max, dtype=tf.float64)
     return count / num_samples
 
-@tf.function
-def z_likelihood(z, f_z):
-    """
-    Returns a tensor of shape (num_samples)
-    :param z: tuple of the form (x, chi) where chi is a tensor of shape (num_choices, d) and x is an index to
-    the most preferred input in chi
-    :param f_z: tensor of shape (num_samples, num_choices) with f values corresponding to chi
-    """
-    x = z[0]
-    return tf.exp(f_z[:, x]) / tf.reduce_sum(tf.exp(f_z), axis=1)
 
 @tf.function
 def p_z_cond_D_x_star(z, x_star, p_x_star_cond, model, num_samples=1000):
@@ -160,7 +163,7 @@ def p_z_cond_D_x_star(z, x_star, p_x_star_cond, model, num_samples=1000):
     samples_x_star_argmax = tf.argmax(samples_x_star, 1, output_type=tf.int32)  # (num_samples)
 
     p_z_cond_f_z = tf.scatter_nd(indices=tf.expand_dims(samples_x_star_argmax, axis=1),
-                                 updates=z_likelihood(z, samples[:, num_max:]),
+                                 updates=samples_likelihood(z, samples[:, num_max:]),
                                  shape=tf.constant([num_max])) + tf.keras.backend.epsilon()
 
     return (1. / p_x_star_cond) * (p_z_cond_f_z / num_samples)
