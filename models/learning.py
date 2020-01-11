@@ -8,7 +8,6 @@ Formulation by Nguyen Quoc Phong.
 
 import numpy as np
 import tensorflow as tf
-import tensorflow_probability as tfp
 import gpflow
 from gpflow.utilities import set_trainable
 
@@ -52,7 +51,7 @@ def variational_expectations(q_mu, q_var, D_idxs, max_idxs):
 
 def variational_expectations_fullcov(q_mu, q_sqrt_latent, inducing_variables, D_idxs, max_idxs, kernel, inputs):
     """
-    Calculates the expectations using multiple k-dimensional Gaussian-Hermite quadratures where k is the number of
+    Calculates the expectations using multiple k-dimensional Gauss-Hermite quadratures where k is the number of
     choices
     :param q_mu: tensor with shape (num_inducing, 1)
     :param q_sqrt_latent: tensor with shape (1, num_inducing, num_inducing). Will be forced into lower triangular
@@ -247,7 +246,7 @@ def train_model(X, y, num_steps=5000):
     return q_mu, q_var, inputs
 
 
-def train_model_fullcov(X, y, num_steps=5000):
+def train_model_fullcov(X, y, num_inducing=10, num_steps=5000):
     idx_to_val_dict, val_to_idx_dict = populate_dicts(X)
     D_idxs, max_idxs = val_to_idx(X, y, val_to_idx_dict)
 
@@ -255,22 +254,27 @@ def train_model_fullcov(X, y, num_steps=5000):
     inputs = np.array([idx_to_val_dict[i] for i in range(n)])
 
     # Initialize variational parameters
-    q_mu = tf.Variable(np.zeros([n, 1]), name="q_mu", dtype=tf.float64)
-    q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(n), axis=0), name="q_sqrt_latent", dtype=tf.float64)
+    u = tf.Variable(np.expand_dims(np.linspace(0.0, 1.0, 10), axis=1), dtype=tf.float64)
+    q_mu = tf.Variable(np.zeros([num_inducing, 1]), name="q_mu", dtype=tf.float64)
+    q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(num_inducing), axis=0), name="q_sqrt_latent", dtype=tf.float64)
     kernel = gpflow.kernels.RBF()
     kernel.lengthscale.assign(0.05)
 
-    neg_elbo = lambda: -elbo_fullcov(q_mu, q_sqrt_latent, D_idxs, max_idxs,
+    neg_elbo = lambda: -elbo_fullcov(q_mu=q_mu,
+                                     q_sqrt_latent=q_sqrt_latent,
+                                     inducing_variables=u,
+                                     D_idxs=D_idxs,
+                                     max_idxs=max_idxs,
                                      kernel=kernel,
                                      inputs=inputs)
     optimizer = tf.keras.optimizers.Adam()
-    trainable_vars = [q_mu, q_sqrt_latent] + list(kernel.trainable_variables)
+    trainable_vars = [q_mu, q_sqrt_latent, u] + list(kernel.trainable_variables)
     for i in range(num_steps):
         optimizer.minimize(neg_elbo, var_list=trainable_vars)
         if i % 500 == 0:
             print('Negative ELBO at step %s: %s' % (i, neg_elbo().numpy()))
 
-    return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), inputs, kernel  # q_mu and q_sqrt
+    return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), u, inputs, kernel  # q_mu and q_sqrt
 
 
 def init_SVGP(q_mu, q_var, inputs, kernel, likelihood):
@@ -303,11 +307,12 @@ def init_SVGP(q_mu, q_var, inputs, kernel, likelihood):
     return model
 
 
-def init_SVGP_fullcov(q_mu, q_sqrt, inputs, kernel, likelihood):
+def init_SVGP_fullcov(q_mu, q_sqrt, inducing_variables, kernel, likelihood):
     """
     Returns a gpflow SVGP model using the values obtained from train_model.
     :param q_mu: np array or tensor of shape (num_inputs, 1)
     :param q_sqrt: np array or tensor of shape (num_inputs, num_inputs). Lower triangular matrix
+    :param inducing_variables: tensor of shape (num_inducing, input_dims)
     :param inputs: np array or tensor of shape (num_inputs, input_dims)
     :param kernel: gpflow kernel
     :param likelihood: gpflow likelihood
@@ -315,7 +320,7 @@ def init_SVGP_fullcov(q_mu, q_sqrt, inputs, kernel, likelihood):
 
     model = gpflow.models.SVGP(kernel=kernel,
                                likelihood=likelihood,
-                               inducing_variable=inputs)
+                               inducing_variable=inducing_variables)
 
     model.q_mu.assign(q_mu)
     model.q_sqrt.assign(q_sqrt)
@@ -327,3 +332,4 @@ def init_SVGP_fullcov(q_mu, q_sqrt, inputs, kernel, likelihood):
     set_trainable(model.inducing_variable.Z, False)
 
     return model
+

@@ -128,9 +128,9 @@ def samples_likelihood(z, f_z):
 
 
 @tf.function
-def p_x_star_cond_D(x_star, model, num_samples=1000):
+def log_p_x_star_cond_D(x_star, model, num_samples=1000):
     """
-    Among possible maximizers of the function, calculates the probability that each is the global maximizer.
+    Among possible maximizers of the function, calculates the log probability that each is the global maximizer.
     Samples from the model and calculates an expectation from the samples.
     Returns a tensor of shape (num_max)
     :param x_star: possible maximizers, tensor of shape (num_max, d)
@@ -140,19 +140,19 @@ def p_x_star_cond_D(x_star, model, num_samples=1000):
 
     samples = tf.squeeze(model.predict_f_samples(x_star, num_samples))  # (num_samples, num_max)
     samples_argmax = tf.argmax(samples, 1, output_type=tf.int32)  # (num_samples)
-    count = tf.zeros(num_max, dtype=tf.float64) + tf.keras.backend.epsilon()  # Start all at one so we avoid dividing by zero later on
+    count = tf.zeros(num_max, dtype=tf.float64) + tf.keras.backend.epsilon()  # Add epsilon to avoid dividing by 0
     count += tf.math.bincount(samples_argmax, minlength=num_max, dtype=tf.float64)
-    return count / num_samples
+    return tf.math.log(count / (num_samples + num_max * tf.keras.backend.epsilon()))
 
 
 @tf.function
-def p_z_cond_D_x_star(z, x_star, p_x_star_cond, model, num_samples=1000):
+def log_p_z_cond_D_x_star(z, x_star, log_p_x_star_cond, model, num_samples=1000):
     """
     Returns a tensor of shape (num_max)
     :param z: tuple of the form (x, chi) where chi is a tensor of shape (num_choices, d) and x is an index to
     the most preferred input in chi
     :param x_star: possible maximizers, tensor of shape (num_max, d)
-    :param p_x_star_cond_D: tensor of shape (num_max)
+    :param log_p_x_star_cond_D: tensor of shape (num_max)
     :param model: GPflow model
     """
     num_max = x_star.shape[0]
@@ -166,7 +166,7 @@ def p_z_cond_D_x_star(z, x_star, p_x_star_cond, model, num_samples=1000):
                                  updates=samples_likelihood(z, samples[:, num_max:]),
                                  shape=tf.constant([num_max])) + tf.keras.backend.epsilon()
 
-    return (1. / p_x_star_cond) * (p_z_cond_f_z / num_samples)
+    return tf.math.log(p_z_cond_f_z / num_samples) - log_p_x_star_cond
 
 
 def I(chi, x_star, model):
@@ -180,20 +180,20 @@ def I(chi, x_star, model):
     num_choices = chi.shape[0]
     num_max = x_star.shape[0]
 
-    p_x_star_cond = p_x_star_cond_D(x_star, model)  # (num_max)
+    log_p_x_star_cond = log_p_x_star_cond_D(x_star, model)  # (num_max)
 
     expected_log = tf.Variable(initial_value=tf.zeros((num_max, num_choices), dtype=tf.float64),
                                dtype=tf.float64,
                                shape=(num_max, num_choices))  # p(z|D,x_star)*log((p|D,x_star)/p(z|D))
     for i in range(num_choices):
         z = (i, chi)
-        p_z_cond = p_z_cond_D_x_star(z, x_star, p_x_star_cond, model)
-        norm_constant = tf.reduce_sum(p_x_star_cond * p_z_cond)
-        expected_log[:, i].assign(p_z_cond * tf.math.log(p_z_cond / norm_constant))
+        log_p_z_cond = log_p_z_cond_D_x_star(z, x_star, log_p_x_star_cond, model)
+        norm_constant = tf.reduce_logsumexp(log_p_x_star_cond + log_p_z_cond)
+        expected_log[:, i].assign(tf.exp(log_p_z_cond) * (log_p_z_cond - norm_constant))
 
     sum_over_preferred = tf.reduce_sum(expected_log, axis=1)
 
-    return tf.reduce_sum(p_x_star_cond * sum_over_preferred)
+    return tf.reduce_sum(tf.exp(log_p_x_star_cond) * sum_over_preferred)
 
 
 def I_batch(chi_batch, x_star, model):
