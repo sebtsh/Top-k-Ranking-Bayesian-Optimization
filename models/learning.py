@@ -52,7 +52,8 @@ def variational_expectations(q_mu, q_var, D_idxs, max_idxs):
 
 def variational_expectations_fullcov(q_mu, q_sqrt_latent, inducing_variables, D_idxs, max_idxs, kernel, inputs):
     """
-
+    Calculates the expectations using multiple k-dimensional Gaussian-Hermite quadratures where k is the number of
+    choices
     :param q_mu: tensor with shape (num_inducing, 1)
     :param q_sqrt_latent: tensor with shape (1, num_inducing, num_inducing). Will be forced into lower triangular
         matrix such that q_sqrt @ q_sqrt^T represents the covariance matrix of inducing variables
@@ -137,22 +138,6 @@ def cholesky_matrix_inverse(A):
     return tf.linalg.matrix_transpose(L_inv) @ L_inv
 
 
-def multivariate_normal_log_pdf(mean, covariance, x):
-    """
-    Calculates the log probability density of the point x in the multivariate normal distribution specified.
-    :param mean: tensor of shape (n)
-    :param covariance: tensor of shape (n, n)
-    :param x: tensor of shape (n)
-    :return: scalar
-    """
-
-    mahalanobis_squared = tf.squeeze(tf.expand_dims(x - mean, axis=0) @
-                                     cholesky_matrix_inverse(covariance) @
-                                     tf.expand_dims(x - mean, axis=1))
-    return -0.5 * (mahalanobis_squared + tf.cast(x.shape[0] * tf.math.log(2 * np.pi), dtype=tf.float64) +
-                   tf.linalg.logdet(covariance))
-
-
 def q_f(q_mu, q_sqrt_latent, inducing_variables, kernel, inputs):
     """
     Calculates the mean and covariance of the joint distribution q(f)
@@ -181,105 +166,6 @@ def q_f(q_mu, q_sqrt_latent, inducing_variables, kernel, inputs):
     f_cov = Knn + (A @ (S - Kmm) @ tf.linalg.matrix_transpose(A))
 
     return f_mean, f_cov
-
-
-def q_joint_f_u(q_mu, q_sqrt_latent, inducing_variables, kernel, inputs):
-    """
-    Calculates the mean and covariance of the joint distribution q(f, u). Has form [f; u] where values corresponding
-    to f values are before u values
-    :param q_mu: tensor with shape (num_inducing, 1)
-    :param q_sqrt_latent: tensor with shape (1, num_inducing, num_inducing). Will be forced into lower triangular
-    matrix such that q_sqrt @ q_sqrt^T represents the covariance matrix of inducing variables
-    :param inducing_variables: tensor with shape (num_inducing, input_dims)
-    :param kernel: gpflow kernel to calculate covariance matrix for KL divergence
-    :param inputs: tensor of shape (num_inputs, input_dims) with indices corresponding to that of D_idxs and max_idxs
-    :return: (tensor of shape (num_inputs + num_inducing),
-        tensor of shape (num_data+num_inducing, num_data+num_inducing))
-    """
-    m = inducing_variables.shape[0]  # num_inducing
-
-    q_sqrt = tf.linalg.band_part(q_sqrt_latent, -1, 0)  # Force into lower triangular
-    q_full = q_sqrt @ tf.linalg.matrix_transpose(q_sqrt)  # (1, num_data, num_data)
-
-    Kmm = kernel.K(inducing_variables)  # (m, m)
-    Kmm_inv = cholesky_matrix_inverse(Kmm)
-
-    Knm = kernel.K(inputs, inducing_variables)  # (n, m)
-    A = Knm @ Kmm_inv  # (n, m)
-
-    # Build mean of joint distribution q(f, u) E[f; u] so f values stacked onto u values
-    f_u_mean = tf.squeeze(tf.concat([A, tf.eye(m, dtype=tf.float64)], axis=0) @ q_mu, axis=-1)  # (n+m)
-
-    # Build covariance of joint distribution q(f, u)
-    Knn = kernel.K(inputs)
-    S = tf.squeeze(q_full, axis=0)
-
-    f_cov = Knn + (A @ (S - Kmm) @ tf.linalg.matrix_transpose(A))  # Marginal covariance of f
-    f_u_cov = tf.concat([tf.concat([f_cov, S @ tf.linalg.matrix_transpose(A)], axis=0),
-                         tf.concat([A @ S, S], axis=0)],
-                        axis=1)
-
-    return f_u_mean, f_u_cov
-
-
-def elbo_inducing_variables(q_mu, q_sqrt_latent, inducing_variables, D_idxs, max_idxs, kernel, inputs):
-    """
-    Calculates the ELBO for the PBO formulation, using a full covariance matrix and inducing variables.
-    :param q_mu: tensor with shape (num_inducing, 1)
-    :param q_sqrt_latent: tensor with shape (1, num_inducing, num_inducing). Will be forced into lower triangular
-        matrix such that q_sqrt @ q_sqrt^T represents the covariance matrix of inducing variables
-    :param inducing_variables: tensor with shape (num_inducing, input_dims)
-    :param D_idxs: tensor with shape (num_data, num_choices, 1)
-        Input data points, that are indices into q_mu and q_var for tf.gather_nd
-    :param max_idxs: tensor with shape (num_data, 1)
-        Selection of most preferred input point for each collection of data points, that are indices into
-        q_mu and q_var
-    :param kernel: gpflow kernel to calculate covariance matrix for KL divergence
-    :param inputs: tensor of shape (num_inputs, input_dims) with indices corresponding to that of D_idxs and max_idxs
-    :return: tensor of shape ()
-    """
-    num_inducing = inducing_variables.shape[0]
-    num_inputs = inputs.shape[0]
-
-    def integrand_func(f_u):
-        """
-        Term that we calculate the expectation over the joint distribution q(f, u) for. Integrand for quadrature
-        method
-        :param f_u: tensor of shape (1, num_data + num_inducing)
-        """
-        u_vals = f_u[0, num_inputs:]
-
-        q_u_mean = tf.squeeze(q_mu, axis=-1)  # (num_inducing)
-        q_sqrt = tf.linalg.band_part(q_sqrt_latent, -1, 0)  # Force into lower triangular
-        q_u_cov = tf.squeeze(q_sqrt @ tf.linalg.matrix_transpose(q_sqrt), axis=0)  # (num_inducing, num_inducing)
-
-        p_u_mean = tf.zeros(num_inducing, dtype=tf.float64)
-        p_u_cov = kernel.K(inducing_variables)
-
-        log_p_u = multivariate_normal_log_pdf(p_u_mean, p_u_cov, u_vals)
-        log_q_u = multivariate_normal_log_pdf(q_u_mean, q_u_cov, u_vals)
-
-        f_vals = f_u[0, :num_inputs]
-        f_max = tf.gather_nd(f_vals, max_idxs)  # (num_data)
-        f_all = tf.gather_nd(f_vals, D_idxs)  # (num_data, num_choices)
-        exp_f_max = tf.exp(f_max)
-        exp_f_all = tf.exp(f_all)
-        exp_f_sums = tf.reduce_sum(exp_f_all, axis=1)  # (num_data)
-        sum_log_likelihood = tf.reduce_sum(tf.math.log(exp_f_max / exp_f_sums))
-
-        return log_p_u - log_q_u + sum_log_likelihood
-
-    print("Calculating joint")
-    f_u_mean, f_u_cov = q_joint_f_u(q_mu, q_sqrt_latent, inducing_variables, kernel, inputs)
-    print("Doing mvnquad")
-
-    ans = gpflow.quadrature.mvnquad(func=integrand_func,
-                                     means=tf.expand_dims(f_u_mean, axis=0),
-                                     covs=tf.expand_dims(f_u_cov, axis=0),
-                                     H=10,
-                                     Din=num_inputs + num_inducing)
-
-    return ans
 
 
 def populate_dicts(D_vals):
@@ -441,34 +327,3 @@ def init_SVGP_fullcov(q_mu, q_sqrt, inputs, kernel, likelihood):
     set_trainable(model.inducing_variable.Z, False)
 
     return model
-
-
-inducing_variables = tf.Variable(tf.squeeze(np.array([[[0.1], [0.1]],
-              [[0.2], [0.2]],
-              [[0.76], [0.9]]]), axis=-1
-                     ))
-
-inputs = tf.Variable(np.squeeze(np.array([[[0.2], [0.4]],
-              [[0.4], [0.7]],
-              [[0.9], [0.2]],
-              [[0.7], [0.9]],
-              [[0.2], [0.7]],
-              [[0.7], [0.76]]])))
-
-kernel = gpflow.kernels.RBF()
-k_1 = gpflow.kernels.Matern52()
-q_sqrt_latent = tf.expand_dims(tf.linalg.cholesky(k_1.K(inducing_variables)), axis=0)
-q_mu = tf.constant([[1.2], [2.1], [3.1]], dtype=tf.float64)
-D_idxs = tf.constant([[[0], [1]],
-                      [[2], [1]],
-                      [[3], [1]],
-                      [[2], [4]],
-                      [[5], [1]],
-                      [[2], [3]]])
-max_idxs = tf.constant([[1],
-                        [2],
-                        [3],
-                        [4],
-                        [5],
-                        [3]])
-print(variational_expectations_fullcov(q_mu, q_sqrt_latent, inducing_variables, D_idxs, max_idxs, kernel, inputs))
