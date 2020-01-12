@@ -79,7 +79,7 @@ def variational_expectations_fullcov(q_mu, q_sqrt_latent, inducing_variables, D_
                 covs[n, i, j] = f_cov[D_idxs[n][i][0], D_idxs[n][j][0]]
     covs = tf.constant(covs, dtype=tf.float64)
 
-    integral_sum = tf.constant(0, dtype=tf.float64)
+    integral_sum = tf.Variable(0, dtype=tf.float64)
 
     for n in range(num_data):
         choice_idx = 0
@@ -87,12 +87,12 @@ def variational_expectations_fullcov(q_mu, q_sqrt_latent, inducing_variables, D_
             if max_idxs[n][0] == D_idxs[n][i][0]:
                 choice_idx = i
                 break
-        integral_sum += tf.squeeze(gpflow.quadrature.mvnquad(func=lambda x: x[:, choice_idx]
+        integral_sum = integral_sum + tf.squeeze(gpflow.quadrature.mvnquad(func=lambda x: x[:, choice_idx]
                                                                     - tf.reduce_logsumexp(x, axis=1),
-                                                             means=tf.expand_dims(means[n], axis=0),
-                                                             covs=tf.expand_dims(covs[n], axis=0),
-                                                             H=100,
-                                                             Din=num_choices))
+                                                                           means=tf.expand_dims(means[n], axis=0),
+                                                                           covs=tf.expand_dims(covs[n], axis=0),
+                                                                           H=100,
+                                                                           Din=num_choices))
 
     return integral_sum
 
@@ -246,7 +246,7 @@ def train_model(X, y, num_steps=5000):
     return q_mu, q_var, inputs
 
 
-def train_model_fullcov(X, y, num_inducing=10, num_steps=5000):
+def train_model_fullcov(X, y, num_inducing=5, num_steps=5000):
     idx_to_val_dict, val_to_idx_dict = populate_dicts(X)
     D_idxs, max_idxs = val_to_idx(X, y, val_to_idx_dict)
 
@@ -254,7 +254,7 @@ def train_model_fullcov(X, y, num_inducing=10, num_steps=5000):
     inputs = np.array([idx_to_val_dict[i] for i in range(n)])
 
     # Initialize variational parameters
-    u = tf.Variable(np.expand_dims(np.linspace(0.0, 1.0, 10), axis=1), dtype=tf.float64)
+    u = tf.Variable(np.expand_dims(np.linspace(0.0, 1.0, num_inducing), axis=1), dtype=tf.float64)
     q_mu = tf.Variable(np.zeros([num_inducing, 1]), name="q_mu", dtype=tf.float64)
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(num_inducing), axis=0), name="q_sqrt_latent", dtype=tf.float64)
     kernel = gpflow.kernels.RBF()
@@ -267,11 +267,18 @@ def train_model_fullcov(X, y, num_inducing=10, num_steps=5000):
                                      max_idxs=max_idxs,
                                      kernel=kernel,
                                      inputs=inputs)
-    optimizer = tf.keras.optimizers.Adam()
+
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=0.001,
+        decay_steps=800,
+        decay_rate=0.25,
+        staircase=True)
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
     trainable_vars = [q_mu, q_sqrt_latent, u] + list(kernel.trainable_variables)
     for i in range(num_steps):
         optimizer.minimize(neg_elbo, var_list=trainable_vars)
-        if i % 500 == 0:
+        if i % 50 == 0:
             print('Negative ELBO at step %s: %s' % (i, neg_elbo().numpy()))
 
     return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), u, inputs, kernel  # q_mu and q_sqrt
