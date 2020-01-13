@@ -59,6 +59,7 @@ def sample_maximizers(X, y, count, D, model, num_steps=3000):
     :param D: number of Fourier features to use
     :param model: gpflow model that uses the RBF kernel and has been optimized
     :param num_steps: int that specifies how many optimization steps to take
+    :return: tensor of shape (count, d)
     """
     d = X.shape[1]
 
@@ -92,7 +93,7 @@ def sample_maximizers(X, y, count, D, model, num_steps=3000):
 
     for i in range(num_steps):
         optimizer.minimize(loss, var_list=[x_star_latent])
-        if i % 200 == 0:
+        if i % 500 == 0:
             print('Loss at step %s: %s' % (i, loss().numpy()))
 
     return tf.squeeze(tf.sigmoid(x_star_latent), axis=1)

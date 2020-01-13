@@ -246,7 +246,7 @@ def train_model(X, y, num_steps=5000):
     return q_mu, q_var, inputs
 
 
-def train_model_fullcov(X, y, num_inducing=5, num_steps=5000):
+def train_model_fullcov(X, y, num_inducing, num_steps=5000):
     idx_to_val_dict, val_to_idx_dict = populate_dicts(X)
     D_idxs, max_idxs = val_to_idx(X, y, val_to_idx_dict)
 
@@ -278,7 +278,7 @@ def train_model_fullcov(X, y, num_inducing=5, num_steps=5000):
     trainable_vars = [q_mu, q_sqrt_latent, u] + list(kernel.trainable_variables)
     for i in range(num_steps):
         optimizer.minimize(neg_elbo, var_list=trainable_vars)
-        if i % 50 == 0:
+        if i % 500 == 0:
             print('Negative ELBO at step %s: %s' % (i, neg_elbo().numpy()))
 
     return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), u, inputs, kernel  # q_mu and q_sqrt
