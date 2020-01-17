@@ -296,7 +296,8 @@ def init_SVGP(q_mu, q_var, inputs, kernel, likelihood):
 
     model = gpflow.models.SVGP(kernel=kernel,
                                likelihood=likelihood,
-                               inducing_variable=inputs)
+                               inducing_variable=inputs,
+                               whiten=False)
 
     mu_vals = np.expand_dims(q_mu.numpy(), 1)
     model.q_mu.assign(mu_vals)
@@ -327,7 +328,8 @@ def init_SVGP_fullcov(q_mu, q_sqrt, inducing_variables, kernel, likelihood):
 
     model = gpflow.models.SVGP(kernel=kernel,
                                likelihood=likelihood,
-                               inducing_variable=inducing_variables)
+                               inducing_variable=inducing_variables,
+                               whiten=False)
 
     model.q_mu.assign(q_mu)
     model.q_sqrt.assign(q_sqrt)

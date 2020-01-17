@@ -23,7 +23,23 @@ def sample_maximizers_simple(model, count, num_discrete_points):
     return np.expand_dims(np.take(xx, samples_argmax), axis=1)
 
 
-def fourier_features(X, kernel, D=100):
+def fourier_features(X, W, b, kernel):
+    """
+    Given sampled tensors W and b, construct Fourier features of X
+    :param X: tensor of shape (count, n, d)
+    :param W: tensor of shape (count, D, d)
+    :param b: tensor of shape (count, D, 1)
+    :param kernel: gpflow kernel
+    :return: tensor of shape (count, n, D)
+    """
+    D = W.shape[1]
+
+    WX_b = W @ tf.linalg.matrix_transpose(X) + b  # (count, D, n)
+    alpha = kernel.variance
+    return tf.sqrt(2.0 * alpha / D) * tf.cos(tf.linalg.matrix_transpose(WX_b))  # (count, n, D)
+
+
+def sample_fourier_features(X, kernel, D=100):
     """
     Fourier feature mapping of X for the RBF kernel
     :param X: tensor of shape (count, n, d)
@@ -41,10 +57,31 @@ def fourier_features(X, kernel, D=100):
                           minval=0,
                           maxval=2 * np.pi,
                           dtype=tf.float64)
-    WX_b = W @ tf.linalg.matrix_transpose(X) + b  # (count, D, n)
-    alpha = kernel.variance ** d
 
-    return tf.sqrt(2.0 * alpha / D) * tf.cos(tf.linalg.matrix_transpose(WX_b)), W, b  # (count, n, D)
+    return fourier_features(X, W, b, kernel), W, b  # (count, n, D)
+
+
+def sample_theta(phi, model, y):
+    """
+
+    :param phi: Fourier features tensor with shape (count, n, d)
+    :param model: gpflow model
+    :param y: objective function evaluations, tensor with shape (n, 1)
+    :return: tensor with shape (count, D, 1)
+    """
+    D = phi.shape[-1]
+
+    A = (tf.linalg.matrix_transpose(phi) @ phi) + \
+        tf.expand_dims(model.likelihood.variance * tf.eye(D, dtype=tf.float64), axis=0)
+    A_inv = tf.linalg.inv(A)  # (count, D, D)
+    theta_mean = tf.squeeze(A_inv @ tf.linalg.matrix_transpose(phi) @ tf.expand_dims(y, axis=0))  # (count, D)
+
+    theta_var = model.likelihood.variance * A_inv
+    theta_dist = tfp.distributions.MultivariateNormalFullCovariance(loc=theta_mean,
+                                                                    covariance_matrix=theta_var)
+    theta = tf.expand_dims(tf.dtypes.cast(theta_dist.sample(), dtype=tf.float64), axis=2)  # (count, D, 1)
+
+    return theta
 
 
 def sample_maximizers(X, y, count, D, model, num_steps=3000):
@@ -66,24 +103,15 @@ def sample_maximizers(X, y, count, D, model, num_steps=3000):
     X = tf.tile(tf.expand_dims(X, axis=0), [count, 1, 1])  # (count, n, d)
 
     # Sample random features phi and get W and b
-    phi, W, b = fourier_features(X, model.kernel, D)  # phi has shape (count, n, D)
+    phi, W, b = sample_fourier_features(X, model.kernel, D)  # phi has shape (count, n, D)
 
     # Sample posterior weights theta
-    A = (tf.linalg.matrix_transpose(phi) @ phi) + \
-        tf.expand_dims(model.likelihood.variance * tf.eye(D, dtype=tf.float64), axis=0)
-    A_inv = tf.linalg.inv(A)  # (count, D, D)
-    theta_mean = tf.squeeze(A_inv @ tf.linalg.matrix_transpose(phi) @ tf.expand_dims(y, axis=0))  # (count, D)
-    theta_var = model.likelihood.variance * A_inv
-    theta_dist = tfp.distributions.MultivariateNormalFullCovariance(loc=theta_mean,
-                                                                    covariance_matrix=theta_var)
-    theta = tf.expand_dims(tf.dtypes.cast(theta_dist.sample(), dtype=tf.float64), axis=2)  # (count, D, 1)
+    theta = sample_theta(phi, model, y)
 
     def construct_maximizer_objective(x_star_latent):
         # Construct g
         x_star = tf.sigmoid(x_star_latent)  # Constrains the value of x_star to between 0 and 1
-        WX_b = W @ tf.linalg.matrix_transpose(x_star) + b  # (count, D, 1)
-        alpha = model.kernel.variance ** d
-        g = tf.reduce_sum((tf.sqrt(2.0 * alpha / D) * tf.cos(tf.linalg.matrix_transpose(WX_b))) @ theta)
+        g = tf.reduce_sum(fourier_features(x_star, W, b, model.kernel) @ theta)
         return -g
 
     # Compute x_star using gradient based methods
@@ -93,7 +121,7 @@ def sample_maximizers(X, y, count, D, model, num_steps=3000):
 
     for i in range(num_steps):
         optimizer.minimize(loss, var_list=[x_star_latent])
-        if i % 500 == 0:
+        if i % 5000 == 0:
             print('Loss at step %s: %s' % (i, loss().numpy()))
 
     return tf.squeeze(tf.sigmoid(x_star_latent), axis=1)
