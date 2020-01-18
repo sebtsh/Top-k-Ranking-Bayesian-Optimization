@@ -46,12 +46,11 @@ def sample_fourier_features(X, kernel, D=100):
     :return: tensor of shape (count, n, D)
     """
     count = X.shape[0]
-    n = X.shape[1]
     d = X.shape[2]
 
     W = tf.random.normal(shape=(count, D, d),
                          mean=0.0,
-                         stddev=1.0 / tf.sqrt(kernel.lengthscale),
+                         stddev=1.0 / kernel.lengthscale,
                          dtype=tf.float64)
     b = tf.random.uniform(shape=(count, D, 1),
                           minval=0,
