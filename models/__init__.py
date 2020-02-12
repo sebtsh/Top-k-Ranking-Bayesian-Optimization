@@ -1,1 +1,1 @@
-from . import learning
+from . import learning, MCCGP, DCGP
