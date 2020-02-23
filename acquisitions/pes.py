@@ -17,9 +17,23 @@ def sample_maximizers_simple(model, count, num_discrete_points):
     """
 
     xx = np.linspace(0.0, 1.0, num_discrete_points).reshape(num_discrete_points, 1)
-    samples = model.predict_f_samples(xx, count) # (count, num_discrete_points)
+    samples = model.predict_f_samples(xx, count)  # (count, num_discrete_points)
     samples_argmax = np.squeeze(np.argmax(samples, axis=1), axis=1)
     return np.expand_dims(np.take(xx, samples_argmax), axis=1)
+
+
+def sample_maximizers_discrete(model, count, data):
+    """
+    Samples maximizers from the GP by sampling values at each discrete point and finding the argmax
+    :param model: gpflow model
+    :param count: number of maximizers
+    :param data: tensor of shape (num_data, input_dims). Discrete points to sample from
+    :return: tensor of shape (count, input_dims)
+    """
+
+    samples = model.predict_f_samples(data, count)  # (count, num_data)
+    samples_argmax = np.squeeze(np.argmax(samples, axis=1), axis=1)
+    return np.take(data, samples_argmax, axis=0)
 
 
 @tf.function
@@ -136,5 +150,33 @@ def sample_inputs(current_inputs, num_samples, num_choices, min_val=0.0, max_val
             cur_idx = i * num_samples + j
             samples[cur_idx, 0, :] = current_inputs[i]
             samples[cur_idx, 1:, :] = uniform_samples[j]
+
+    return tf.constant(samples)
+
+
+def sample_inputs_discrete(current_inputs, data, num_samples, num_choices):
+    """
+    Uniformly samples random inputs to query objective function. Sampled inputs must have
+    existing data points among the choices, otherwise the learned function values for the
+    input choices will be independent of the already learned function values for other data points.
+    Returns np array of shape (num_samples*num_inputs, num_choices, input_dims)
+    :param current_inputs: np array of shape (num_inputs, input_dims)
+    :param data: np array of shape (num_data, input_dims). Combinations will be drawn from here
+    :param num_samples: int, number of random values to permutate with existing inputs
+    :param num_choices: int, number of choices in an input query
+    """
+    num_inputs = current_inputs.shape[0]
+    input_dims = current_inputs.shape[1]
+    num_data = data.shape[0]
+
+    samples = np.zeros([num_samples * num_inputs, num_choices, input_dims])
+    random_indices = np.random.choice(num_data, (num_samples, num_choices - 1))
+    data_samples = np.take(data, random_indices, axis=0)  # (num_samples, num_choices - 1, input_dims)
+
+    for i in range(num_inputs):
+        for j in range(num_samples):
+            cur_idx = i * num_samples + j
+            samples[cur_idx, 0, :] = current_inputs[i]
+            samples[cur_idx, 1:, :] = data_samples[j]
 
     return tf.constant(samples)
