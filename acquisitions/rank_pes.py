@@ -40,14 +40,28 @@ def I_batch(chi, x_star, model, num_samples=1000, indifference_threshold = 0.0):
     # (num_max,)
 
     # 3. log p(z|D)
-    assert num_choice <= 6, "num_choice = 7 incurs 7!=5040 permutations, which is too large. This requires random sampling of permutations. For current implementation, we consider all possible permutations."
-    permutations = list(itertools.permutations(range(num_choice)))  
-    # n_observation_type = factorial(num_choice) # = len(permutations)
+    assert num_choice <= 6, "num_choice = 7 incurs 5040 permutations, which is too large. This requires random sampling of permutations. For current implementation, we consider all possible permutations."
 
-    if indifference_threshold > 1e-200: # i.e., not 0.0
-        separators = gen_separator(num_choice)
-        separator_weights = [get_generator_weight(s) for s in separators]
+    is_observation_randomized = (num_choice >= 7)
+    is_indifference_allowed = (indifference_threshold > 1e-200) # non zero
+
+    if is_observation_randomized:
+        permutations = gen_rand_permutation(num_choice, 500 if is_indifference_allowed else 5000)
     else:
+        permutations = [np.array(order) for order in itertools.permutations(range(num_choice))]
+        # n_observation_type = factorial(num_choice) # = len(permutations)
+
+    if is_indifference_allowed:
+
+        if is_observation_randomized:
+            separators = gen_rand_separator(num_choice, 10)
+        else:
+            separators = gen_separator(num_choice)
+        
+        separator_weights = np.array([get_generator_weight(s) for s in separators], dtype=float)
+    
+    else:
+
         separators = [ list(range(num_choice+1)) ] 
         separator_weights = [1.0]
         # only 1 separator for no indifference
@@ -62,7 +76,12 @@ def I_batch(chi, x_star, model, num_samples=1000, indifference_threshold = 0.0):
     # where n_observation_type = factorial(num_choice) * num_separators
     #   = len(permutations) * num_separators
     n_observation_type = log_p_obs.shape[0]
-    print("Number of possible observations for {} choices: {}".format(num_choice, n_observation_type))
+
+    print("Number of {} observations {} for {} choices: {}".format(
+            "randomized" if is_observation_randomized else "all possible",
+            "(indifference allowed)" if is_indifference_allowed else "(strictly ordered)",
+            num_choice, 
+            n_observation_type))
     print("Number of permutations: {}, separators: {}".format(len(permutations), len(separators)))
 
     # 4. log p(z,xstar| D)
@@ -139,55 +158,6 @@ def get_log_likelihood(fx, permutations, separators, separator_weights, normaliz
         all_log_likelihood[(i*n_separator):((i+1)*n_separator),:] = log_likelihood
 
     return all_log_likelihood
-
-
-def get_generator_weight(separator):
-    """
-    0 | 1 2 and 0 | 2 1 are treated the same
-    as there is no preference (i.e., indifference) 
-    between 1 and 2 in this case
-    """
-    return np.prod(spmc.factorial( np.diff(separator) ))
-
-
-def gen_separator(num_choice):
-    """
-    gen_separator(3) returns [[0, 3], [0, 1, 3], [0, 1, 2, 3], [0, 2, 3]]
-    [0,1,3] means index_0 < (less preferred to) (index_1, index_2) 
-    where (index_1, index_2) means no preference (i.e., indifference) between index_1 and index_2
-        denoted as: index_0 | index_1 index_2
-    Hence the separators for num_choice = 3 are:
-    [0, 3]:       |0 1 2|: no preference at all
-    [0, 1, 3]:    |0|1 2|
-    [0, 1, 2, 3]: |0|1|2|: fully-ordered
-    [0, 2, 3]:    |0 1|2|
-    """
-
-    all_seps = []
-
-    for sepint in range( 0, int(2**(num_choice-1)) ):
-        j = 0
-        last_digit = -1
-        sep = []
-
-        while sepint > 0:
-
-            if sepint % 2 != last_digit:
-                last_digit = sepint % 2
-                sep.append(j)
-            
-            sepint = int(sepint / 2)
-        
-            j+= 1
-
-        if j < num_choice:
-            sep.append(j)
-        
-        sep.append(num_choice)
-
-        all_seps.append(sep)
-
-    return all_seps
 
 
 def get_log_likelihood_given_order(fx, order, separators, separator_weights, normalizer=None, indifference_threshold = 0.0):
@@ -296,7 +266,7 @@ def get_log_likelihood_given_preference(fx, choice_idxs, selected_idx, normalize
 
     else:
         # indifference to all choices
-        fx = np.extend_dims(fx, axis=-1)
+        fx = np.expand_dims(fx, axis=-1)
         # (num_sample, num_data, num_choice,1)
 
         selected_f = fx * mask_mat
@@ -307,7 +277,7 @@ def get_log_likelihood_given_preference(fx, choice_idxs, selected_idx, normalize
         all_choice_log_likelihood = spmc.logsumexp(choice_log_likelihood, axis=-1)
         # num_sample, num_data
 
-        indifference_likelihood = np.clip(1.0 - np.exp(choice_log_likelihood), a_min=1e-30, a_max=1.0 - 1e-30)
+        indifference_likelihood = np.clip(1.0 - np.exp(all_choice_log_likelihood), a_min=1e-100, a_max=1.0 - 1e-100)
         log_likelihood = np.log(indifference_likelihood)
         # num_sample, num_data
 
@@ -316,7 +286,92 @@ def get_log_likelihood_given_preference(fx, choice_idxs, selected_idx, normalize
     # num_data
 
     return log_likelihood
-   
+
+
+def get_generator_weight(separator):
+    """
+    0 | 1 2 and 0 | 2 1 are treated the same
+    as there is no preference (i.e., indifference) 
+    between 1 and 2 in this case
+    """
+    return np.prod(spmc.factorial( np.diff(separator) ))
+
+
+def gen_separator_at(idx, num_choice):
+    # idx in [0, 2**(num_choice-1)]
+    j = 0
+    last_digit = -1
+    seperator = []
+
+    while idx > 0:
+
+        if idx % 2 != last_digit:
+            last_digit = idx % 2
+            seperator.append(j)
+        
+        idx = int(idx / 2)
+    
+        j+= 1
+
+    if j < num_choice:
+        seperator.append(j)
+    
+    seperator.append(num_choice)
+    return seperator
+
+
+def gen_separator(num_choice):
+    """
+    gen_separator(3) returns [[0, 3], [0, 1, 3], [0, 1, 2, 3], [0, 2, 3]]
+    [0,1,3] means index_0 < (less preferred to) (index_1, index_2) 
+    where (index_1, index_2) means no preference (i.e., indifference) between index_1 and index_2
+        denoted as: index_0 | index_1 index_2
+    Hence the separators for num_choice = 3 are:
+    [0, 3]:       |0 1 2|: no preference at all
+    [0, 1, 3]:    |0|1 2|
+    [0, 1, 2, 3]: |0|1|2|: fully-ordered
+    [0, 2, 3]:    |0 1|2|
+    """
+
+    all_seps = []
+
+    for i in range( 0, 2**(num_choice-1) ):
+        all_seps.append( gen_separator_at(i, num_choice) )
+
+    return all_seps
+
+
+def gen_rand_separator(num_choice, size):
+    idxs = np.random.randint(0, 2**(num_choice-1), size)
+    return [gen_separator_at(i, num_choice) for i in idxs]
+
+
+def gen_kth_permutation(n, k, factorials):
+
+    options = list(range(n))
+    x = np.zeros(n, dtype=int)
+    
+    i = n-1
+    while len(options):
+        idx = int(k / factorials[i])
+        
+        x[n-1-i] = options[idx]
+        del options[idx]
+
+        k = k - idx * factorials[i]
+        i -= 1
+
+    return x
+
+
+def gen_rand_permutation(n, size):
+    factorials = np.ones(n+1, dtype=int)
+    for i in range(1,n+1):
+        factorials[i] = factorials[i-1] * i
+    
+    ks = np.random.randint(0, factorials[n], size)
+
+    return [gen_kth_permutation(n, k, factorials) for k in ks]
 
 
 

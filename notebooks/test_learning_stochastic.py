@@ -13,7 +13,7 @@ from gpflow.utilities import set_trainable, print_summary
 sys.path.append(os.path.split(os.path.split(os.getcwd())[0])[0]) # Move 2 levels up directory to import PBO
 import PBO
 
-SHOW_FIG = True
+SHOW_FIG = False
 
 def forrester(x):
     """
@@ -74,7 +74,7 @@ def plot_gp(model, X, y, title):
         plt.show()
 
 
-num_train = 2000
+num_train = 2
 indifference_threshold = 0.0
 """
 if abs(f(x) - f(x')) < indifference_threshold
