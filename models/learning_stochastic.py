@@ -9,6 +9,9 @@
 """
     forester_get_Y:
         as X is a list, change the function!
+    sample maximizers:
+        change observations from inducing input, inducing variables
+        to distribution of inducing variables
 """
 
 
@@ -32,7 +35,16 @@ from gpflow.utilities import set_trainable
 
 
 
-def elbo_fullcov(q_mu, q_sqrt_latent, inducing_inputs, D_idxs, max_idxs, kernel, inputs, n_inducing_sample=50, n_f_given_inducing_sample=30):
+def elbo_fullcov(q_mu, 
+                q_sqrt_latent, 
+                inducing_inputs, 
+                D_idxs, 
+                max_idxs, 
+                kernel, 
+                inputs, 
+                indifference_threshold=0.0, 
+                n_inducing_sample=50, 
+                n_f_given_inducing_sample=30):
     """
     Calculates the ELBO for the PBO formulation, using a full covariance matrix.
     :param q_mu: tensor with shape (num_inducing, 1)
@@ -54,7 +66,6 @@ def elbo_fullcov(q_mu, q_sqrt_latent, inducing_inputs, D_idxs, max_idxs, kernel,
     invKmm = cholesky_matrix_inverse(Kmm)
 
     num_data = D_idxs.size()
-
 
     # 1. Sample from q(u)
     standard_mvn = tfp.distributions.MultivariateNormalDiag(
@@ -93,6 +104,7 @@ def elbo_fullcov(q_mu, q_sqrt_latent, inducing_inputs, D_idxs, max_idxs, kernel,
     def body(i, likelihood): 
         idxs = tf.squeeze(D_idxs.read(i))
         max_idx = max_idxs[i]
+        num_choice = tf.shape(idxs)[0]
 
         fi_cov = tf.gather(
             tf.gather(f_cov_given_inducing_sample, indices=idxs, axis=0),
@@ -119,9 +131,39 @@ def elbo_fullcov(q_mu, q_sqrt_latent, inducing_inputs, D_idxs, max_idxs, kernel,
         f_samples = tf.expand_dims(zero_mean_f_samples, axis=1) + fi_mean
         # (n_f_given_inducing_sample, n_inducing_sample, num_choice)
 
-        likelihood = likelihood + tf.reduce_mean(
+        # implementing a threshold for the choice of indifference
+        mask_mat = tf.eye(num_choice, dtype=tf.float64)
+        diff_mat = (1.0 - mask_mat) * indifference_threshold
+
+        def true_fn(max_idx, f_samples, diff_mat):
+            f_samples = f_samples + tf.gather(diff_mat, indices=max_idx, axis=0)
+
+            return tf.reduce_mean(
                     tf.gather(f_samples, indices=max_idx, axis=-1) 
                     - tf.reduce_logsumexp(f_samples, axis=-1))
+
+        def false_fn(f_samples, mask_mat, diff_mat):
+            max_idx_f_samples = tf.squeeze(mask_mat @ tf.expand_dims(f_samples, axis=-1), axis=-1)
+            # (n_f_given_inducing_sample, n_inducing_sample, num_choice)
+
+            all_f_samples = tf.expand_dims(f_samples, axis=-1) + tf.gather(diff_mat, indices=max_idx, axis=0)
+            # (n_f_given_inducing_sample, n_inducing_sample, num_choice, num_choice)
+
+            all_choice_logprob = max_idx_f_samples - tf.reduce_logsumexp(all_f_samples, axis=-2)
+            # (n_f_given_inducing_sample, n_inducing_sample, num_choice)
+
+            indifference_prob = 1.0 - tf.exp( tf.reduce_logsumexp(all_choice_logprob, axis=-1) )
+            indifference_prob = tf.clip_by_value(indifference_prob, clip_value_min=1e-50, clip_value_max=1.0-1e-50)
+            indifference_logprob = tf.math.log(indifference_prob)
+            # (n_f_given_inducing_sample, n_inducing_sample)
+            
+            return tf.reduce_mean( indifference_logprob )
+
+        likelihood_i = tf.cond(max_idx >= 0, 
+            lambda: true_fn(max_idx, f_samples, diff_mat), 
+            lambda: false_fn(f_samples, mask_mat, diff_mat))
+
+        likelihood = likelihood + likelihood_i
 
         return i+1, likelihood
 
@@ -228,7 +270,7 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
         and max_idxs (tensor with shape (k, 1)):
             max_idxs[i,0] is argmax of D_idxs[i,:,0]
     :param D_vals: [k] list of ndarray [:,d]
-    :param max_vals: [k] list of ndarray [:,d]
+    :param max_vals: [k] list of ndarray [1,d]
     """
 
     k = len(D_vals)
@@ -236,8 +278,11 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
     max_idxs = np.zeros(k, dtype=np.int32)
 
     for i in range(k):
-        diff = np.sum(np.square(D_vals[i] - max_vals[i]), axis=1)
-        max_idxs[i] = np.where(diff < 1e-30)[0]
+        if max_vals[i] is not None:
+            diff = np.sum(np.square(D_vals[i] - max_vals[i]), axis=1)
+            max_idxs[i] = np.where(diff < 1e-30)[0]
+        else:
+            max_idxs[i] = -1
 
     max_idxs = tf.constant(max_idxs)
 
@@ -261,7 +306,7 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
     return D_idxs, max_idxs
 
 
-def train_model_fullcov(X, y, num_inducing, num_steps=5000):
+def train_model_fullcov(X, y, num_inducing, indifference_threshold=0., num_steps=5000):
     idx_to_val_dict, val_to_idx_dict = populate_dicts(X)
     D_idxs, max_idxs = val_to_idx(X, y, val_to_idx_dict)
 
@@ -281,7 +326,10 @@ def train_model_fullcov(X, y, num_inducing, num_steps=5000):
                                      D_idxs=D_idxs,
                                      max_idxs=max_idxs,
                                      kernel=kernel,
-                                     inputs=inputs)
+                                     inputs=inputs,
+                                     indifference_threshold=indifference_threshold,
+                                     n_inducing_sample=50,
+                                     n_f_given_inducing_sample=50)
 
     optimizer = tf.keras.optimizers.Adam()
     trainable_vars = [q_mu, q_sqrt_latent, u] + list(kernel.trainable_variables)
