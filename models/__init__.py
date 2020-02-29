@@ -1,2 +1,1 @@
-from . import learning
-from . import learning_stochastic
+from . import learning, learning_stochastic
