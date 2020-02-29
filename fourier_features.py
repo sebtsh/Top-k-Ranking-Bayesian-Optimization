@@ -40,41 +40,50 @@ def sample_fourier_features(X, kernel, D=100):
     return fourier_features(X, W, b, kernel), W, b  # (count, n, D)
 
 
-def sample_theta(phi, model, y):
+def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
     """
-
-    :param phi: Fourier features tensor with shape (count, n, d)
-    :param model: gpflow model
-    :param y: objective function evaluations, tensor with shape (n, 1)
+    Samples from distribution q(theta|D) = /int p(theta|y)p(y|f)q(f|D) df dy
+    :param phi: Fourier features tensor with shape (count, n, D)
+    :param q_mu: tensor of shape (n, 1)
+    :param q_sqrt: tensor of shape (1, n, n). Lower triangular matrix
+    :param likelihood_var: scalar. Variance of likelihood function p(y|f) from model
     :return: tensor with shape (count, D, 1)
     """
-    D = phi.shape[-1]
+    n = phi.shape[1]
+    D = phi.shape[2]
 
-    A = (tf.linalg.matrix_transpose(phi) @ phi) + \
-        tf.expand_dims(model.likelihood.variance * tf.eye(D, dtype=tf.float64), axis=0)
+    q_var = q_sqrt @ tf.linalg.matrix_transpose(q_sqrt)  # (1, n, n)
+    noise_I_D = tf.expand_dims(likelihood_var * tf.eye(D, dtype=tf.float64), axis=0)
+    noise_I_n = tf.expand_dims(likelihood_var * tf.eye(n, dtype=tf.float64), axis=0)
+
+    A = (tf.linalg.matrix_transpose(phi) @ phi) + noise_I_D
     A_inv = tf.linalg.inv(A)  # (count, D, D)
-    theta_mean = tf.squeeze(A_inv @ tf.linalg.matrix_transpose(phi) @ tf.expand_dims(y, axis=0))  # (count, D)
+    M = A_inv @ tf.linalg.matrix_transpose(phi)  # (count, D, n)
 
-    theta_var = model.likelihood.variance * A_inv
+    theta_mean = tf.squeeze(M @ tf.expand_dims(q_mu, axis=0), axis=-1)  # (count, D)
+    theta_var = A_inv * likelihood_var + M @ (noise_I_n + q_var) @ tf.linalg.matrix_transpose(M)
+
     theta_dist = tfp.distributions.MultivariateNormalFullCovariance(loc=theta_mean,
                                                                     covariance_matrix=theta_var)
-    theta = tf.expand_dims(tf.dtypes.cast(theta_dist.sample(), dtype=tf.float64), axis=2)  # (count, D, 1)
+    theta = tf.expand_dims(tf.dtypes.cast(theta_dist.sample(), dtype=tf.float64), axis=-1)  # (count, D, 1)
 
     return theta
 
 
-def sample_maximizers(X, y, count, D, model, num_steps=3000):
+def sample_maximizers(X, count, n_init, D, model, num_steps=3000):
     """
     Samples from the posterior over the global maximizer using the method by Shah & Ghahramani (2015). Approximates
     the RBF kernel with its Fourier dual. Samples random Fourier features, constructs a linear model and computes
     the argmax using gradient-based optimization.
 
     :param X: input points, tensor with shape (n, d)
-    :param y: objective function evaluations, tensor with shape (n, 1)
-    :param count: number of maximizers to sample
+    :param count: number of maximizers to sample. Each will be taken from one separate function sample
+    :param n_init: Number of initializing points for each function sample. This method will take the argmax of all
+    initializing points after optimization, so that each function sample will have one maximizer returned
     :param D: number of Fourier features to use
     :param model: gpflow model that uses the RBF kernel and has been optimized
     :param num_steps: int that specifies how many optimization steps to take
+    :param variational: bool. If usin
     :return: tensor of shape (count, d)
     """
     d = X.shape[1]
@@ -85,22 +94,30 @@ def sample_maximizers(X, y, count, D, model, num_steps=3000):
     phi, W, b = sample_fourier_features(X, model.kernel, D)  # phi has shape (count, n, D)
 
     # Sample posterior weights theta
-    theta = sample_theta(phi, model, y)
+    theta = sample_theta_variational(phi, model.q_mu, model.q_sqrt, model.likelihood.variance)
 
-    def construct_maximizer_objective(x_star_latent):
-        # Construct g
-        x_star = tf.sigmoid(x_star_latent)  # Constrains the value of x_star to between 0 and 1
+    def construct_maximizer_objective(x_star):
         g = tf.reduce_sum(fourier_features(x_star, W, b, model.kernel) @ theta)
         return -g
 
     # Compute x_star using gradient based methods
     optimizer = tf.keras.optimizers.Adam()
-    x_star_latent = tf.Variable(tf.random.normal(shape=(count, 1, d), dtype=tf.dtypes.float64))
-    loss = lambda: construct_maximizer_objective(x_star_latent)
+    x_star = tf.Variable(tf.random.uniform(shape=(count, n_init, d),
+                                           minval=0.,
+                                           maxval=1.,
+                                           dtype=tf.dtypes.float64),
+                         constraint=lambda x: tf.clip_by_value(x, 0., 1.))
+    loss = lambda: construct_maximizer_objective(x_star)
 
+    prev_loss = loss().numpy()
     for i in range(num_steps):
-        optimizer.minimize(loss, var_list=[x_star_latent])
-        if i % 5000 == 0:
-            print('Loss at step %s: %s' % (i, loss().numpy()))
+        optimizer.minimize(loss, var_list=[x_star])
+        current_loss = loss().numpy()
+        if i % 500 == 0:
+            print('Loss at step %s: %s' % (i, current_loss))
+        if abs((current_loss-prev_loss) / prev_loss) < 1e-7:
+            print('Loss at step %s: %s' % (i, current_loss))
+            break
+        prev_loss = current_loss
 
-    return tf.squeeze(tf.sigmoid(x_star_latent), axis=1)
+    return tf.reduce_max(x_star, axis=1)
