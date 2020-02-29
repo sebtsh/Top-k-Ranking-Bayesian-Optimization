@@ -49,39 +49,33 @@ def samples_likelihood(z, f_z):
 
 
 @tf.function
-def log_p_x_star_cond_D(x_star, model, num_samples=1000):
+def log_p_x_star_cond_D(num_max, samples_argmax):
     """
     Among possible maximizers of the function, calculates the log probability that each is the global maximizer.
     Samples from the model and calculates an expectation from the samples.
-    Returns a tensor of shape (num_max)
-    :param x_star: possible maximizers, tensor of shape (num_max, d)
-    :param model: GPflow model
-    """
-    num_max = x_star.shape[0]
 
-    samples = tf.squeeze(model.predict_f_samples(x_star, num_samples))  # (num_samples, num_max)
-    samples_argmax = tf.argmax(samples, 1, output_type=tf.int32)  # (num_samples)
+    :param num_max: int, number of maximizers that samples_argmax indexes over
+    :param samples_argmax: tensor of shape (num_samples)
+    :return: Tensor of shape (num_max)
+    """
+    num_samples = samples_argmax.shape[0]
+
     count = tf.zeros(num_max, dtype=tf.float64) + tf.keras.backend.epsilon()  # Add epsilon to avoid dividing by 0
     count += tf.math.bincount(samples_argmax, minlength=num_max, dtype=tf.float64)
     return tf.math.log(count / (num_samples + num_max * tf.keras.backend.epsilon()))
 
 
 @tf.function
-def log_p_z_cond_D_x_star(z, x_star, log_p_x_star_cond, model, num_samples=1000):
+def log_p_z_cond_D_x_star(num_max, samples, samples_x_star_argmax, z, log_p_x_star_cond):
     """
     Returns a tensor of shape (num_max)
+    :param num_max: int, number of maximizers that samples_x_star_argmax indexes over
+    :param samples: tensor of shape (num_samples, num_max + num_choices)
     :param z: tuple of the form (x, chi) where chi is a tensor of shape (num_choices, d) and x is an index to
     the most preferred input in chi
-    :param x_star: possible maximizers, tensor of shape (num_max, d)
     :param log_p_x_star_cond_D: tensor of shape (num_max)
-    :param model: GPflow model
     """
-    num_max = x_star.shape[0]
-
-    x_vals = tf.concat([x_star, z[1]], 0)  # f(x_star), f(z)
-    samples = tf.squeeze(model.predict_f_samples(x_vals, num_samples))  # (num_samples, num_max + num_choices)
-    samples_x_star = samples[:, :num_max]  # (num_samples, num_max)
-    samples_x_star_argmax = tf.argmax(samples_x_star, 1, output_type=tf.int32)  # (num_samples)
+    num_samples = samples.shape[0]
 
     p_z_cond_f_z = tf.scatter_nd(indices=tf.expand_dims(samples_x_star_argmax, axis=1),
                                  updates=samples_likelihood(z, samples[:, num_max:]),
@@ -90,7 +84,7 @@ def log_p_z_cond_D_x_star(z, x_star, log_p_x_star_cond, model, num_samples=1000)
     return tf.math.log(p_z_cond_f_z / num_samples) - log_p_x_star_cond
 
 
-def I(chi, x_star, model):
+def I(chi, x_star, model, num_samples=1000):
     """
     Predictive Entropy Search acquisition function.
     :param chi: input points in a query, tensor of shape (num_choices, d)
@@ -101,14 +95,20 @@ def I(chi, x_star, model):
     num_choices = chi.shape[0]
     num_max = x_star.shape[0]
 
-    log_p_x_star_cond = log_p_x_star_cond_D(x_star, model)  # (num_max)
+    # Sample from the model once, to use for all expectation approximations
+    x_vals = tf.concat([x_star, chi], 0)  # f(x_star), f(z)
+    samples = tf.squeeze(model.predict_f_samples(x_vals, num_samples))  # (num_samples, num_max + num_choices)
+    samples_x_star = samples[:, :num_max]  # (num_samples, num_max)
+    samples_x_star_argmax = tf.argmax(samples_x_star, 1, output_type=tf.int32)  # (num_samples)
+
+    log_p_x_star_cond = log_p_x_star_cond_D(num_max, samples_x_star_argmax)  # (num_max)
 
     expected_log = tf.Variable(initial_value=tf.zeros((num_max, num_choices), dtype=tf.float64),
                                dtype=tf.float64,
                                shape=(num_max, num_choices))  # p(z|D,x_star)*log((p|D,x_star)/p(z|D))
     for i in range(num_choices):
         z = (i, chi)
-        log_p_z_cond = log_p_z_cond_D_x_star(z, x_star, log_p_x_star_cond, model)
+        log_p_z_cond = log_p_z_cond_D_x_star(num_max, samples, samples_x_star_argmax, z, log_p_x_star_cond)
         norm_constant = tf.reduce_logsumexp(log_p_x_star_cond + log_p_z_cond)
         expected_log[:, i].assign(tf.exp(log_p_z_cond) * (log_p_z_cond - norm_constant))
 
