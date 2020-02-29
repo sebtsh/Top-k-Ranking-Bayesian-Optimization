@@ -153,7 +153,7 @@ def elbo_fullcov(q_mu,
             # (n_f_given_inducing_sample, n_inducing_sample, num_choice)
 
             indifference_prob = 1.0 - tf.exp( tf.reduce_logsumexp(all_choice_logprob, axis=-1) )
-            indifference_prob = tf.clip_by_value(indifference_prob, clip_value_min=1e-50, clip_value_max=1.0-1e-50)
+            indifference_prob = tf.clip_by_value(indifference_prob, clip_value_min=1e-50, clip_value_max=1.0 - 1e-50)
             indifference_logprob = tf.math.log(indifference_prob)
             # (n_f_given_inducing_sample, n_inducing_sample)
             
@@ -326,7 +326,9 @@ def train_model_fullcov(X, y, num_inducing, num_steps=5000, indifference_thresho
     kernel = gpflow.kernels.RBF()
     kernel.lengthscale.assign(0.05)
 
-    if indifference_threshold is None:
+    is_threshold_trainable = (indifference_threshold is None)
+
+    if is_threshold_trainable:
         indifference_threshold = tf.Variable(0.1, dtype=tf.float64, 
                         constraint=lambda x: tf.clip_by_value(x, 
                                                 clip_value_min=0.0, 
@@ -345,7 +347,7 @@ def train_model_fullcov(X, y, num_inducing, num_steps=5000, indifference_thresho
 
     optimizer = tf.keras.optimizers.Adam()
 
-    if indifference_threshold is None:
+    if is_threshold_trainable:
         print("Indifference_threshold is trainable.")
         trainable_vars = [q_mu, q_sqrt_latent, u, indifference_threshold] + list(kernel.trainable_variables)
     else:
@@ -365,7 +367,7 @@ def train_model_fullcov(X, y, num_inducing, num_steps=5000, indifference_thresho
             start_time = time.time()
 
 
-    return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), u, inputs, kernel  # q_mu and q_sqrt
+    return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), u, inputs, kernel, indifference_threshold # q_mu and q_sqrt
 
 
 

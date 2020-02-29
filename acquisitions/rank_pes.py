@@ -277,7 +277,7 @@ def get_log_likelihood_given_preference(fx, choice_idxs, selected_idx, normalize
         all_choice_log_likelihood = spmc.logsumexp(choice_log_likelihood, axis=-1)
         # num_sample, num_data
 
-        indifference_likelihood = np.clip(1.0 - np.exp(all_choice_log_likelihood), a_min=1e-100, a_max=1.0 - 1e-100)
+        indifference_likelihood = np.clip(1.0 - np.exp(all_choice_log_likelihood), a_min=1e-50, a_max=1.0 - 1e-50)
         log_likelihood = np.log(indifference_likelihood)
         # num_sample, num_data
 

@@ -7,11 +7,18 @@ import os
 import pickle
 import time 
 
+physical_devices = tf.config.list_physical_devices('GPU') 
+try: 
+  tf.config.experimental.set_memory_growth(physical_devices[0], True) 
+except: 
+  # Invalid device or cannot modify virtual devices once initialized. 
+  pass
 
 from gpflow.utilities import set_trainable, print_summary
 
 sys.path.append(os.path.split(os.path.split(os.getcwd())[0])[0]) # Move 2 levels up directory to import PBO
 import PBO
+
 
 SHOW_FIG = True
 
@@ -74,7 +81,7 @@ def plot_gp(model, X, y, title):
         plt.show()
 
 
-num_train = 2000
+num_train = 1000
 indifference_threshold = 0.0
 """
 if abs(f(x) - f(x')) < indifference_threshold
@@ -145,12 +152,13 @@ print("max_idxs")
 print(max_idxs)
 
 
-q_mu, q_sqrt, u, inputs, k = PBO.models.learning_stochastic.train_model_fullcov(
+q_mu, q_sqrt, u, inputs, k, indifference_threshold = PBO.models.learning_stochastic.train_model_fullcov(
                                     X, y, 
                                     num_inducing=5, 
                                     num_steps=num_train,
-                                    indifference_threshold=0.1)
+                                    indifference_threshold=None)
 
+print(indifference_threshold.numpy())
 
 likelihood = gpflow.likelihoods.Gaussian()
 model = PBO.models.learning.init_SVGP_fullcov(q_mu, q_sqrt, u, k, likelihood)
