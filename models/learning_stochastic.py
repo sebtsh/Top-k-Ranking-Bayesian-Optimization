@@ -42,7 +42,7 @@ def elbo_fullcov(q_mu,
                 max_idxs, 
                 kernel, 
                 inputs, 
-                indifference_threshold=0.0, 
+                indifference_threshold, 
                 n_inducing_sample=50, 
                 n_f_given_inducing_sample=30):
     """
@@ -306,7 +306,13 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
     return D_idxs, max_idxs
 
 
-def train_model_fullcov(X, y, num_inducing, indifference_threshold=0., num_steps=5000):
+def train_model_fullcov(X, y, num_inducing, num_steps=5000, indifference_threshold=None):
+    """
+    if indifference_threshold is None:
+        indifference_threshold is trained with maximum likelihood estimation
+    else:
+        indifference_threshold is fixed
+    """
     idx_to_val_dict, val_to_idx_dict = populate_dicts(X)
     D_idxs, max_idxs = val_to_idx(X, y, val_to_idx_dict)
 
@@ -320,6 +326,12 @@ def train_model_fullcov(X, y, num_inducing, indifference_threshold=0., num_steps
     kernel = gpflow.kernels.RBF()
     kernel.lengthscale.assign(0.05)
 
+    if indifference_threshold is None:
+        indifference_threshold = tf.Variable(0.1, dtype=tf.float64, 
+                        constraint=lambda x: tf.clip_by_value(x, 
+                                                clip_value_min=0.0, 
+                                                clip_value_max=np.infty))
+
     neg_elbo = lambda: -elbo_fullcov(q_mu=q_mu,
                                      q_sqrt_latent=q_sqrt_latent,
                                      inducing_inputs=u,
@@ -332,7 +344,14 @@ def train_model_fullcov(X, y, num_inducing, indifference_threshold=0., num_steps
                                      n_f_given_inducing_sample=50)
 
     optimizer = tf.keras.optimizers.Adam()
-    trainable_vars = [q_mu, q_sqrt_latent, u] + list(kernel.trainable_variables)
+
+    if indifference_threshold is None:
+        print("Indifference_threshold is trainable.")
+        trainable_vars = [q_mu, q_sqrt_latent, u, indifference_threshold] + list(kernel.trainable_variables)
+    else:
+        print("Indifference_threshold is fixed at {}".format(indifference_threshold))
+        trainable_vars = [q_mu, q_sqrt_latent, u] + list(kernel.trainable_variables)
+
     start_time = time.time()
 
     for i in range(num_steps):
