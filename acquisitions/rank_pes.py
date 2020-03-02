@@ -107,7 +107,7 @@ def I_batch(chi, x_star, model, topk=None, num_samples=10000, indifference_thres
         axis=0)
     # (num_data,)
 
-    return mutual_information, log_p_xstar, log_p_obs, log_p_xstar_obs
+    return mutual_information
 
 
 def get_log_likelihood(fx, permutations, normalizer=None):

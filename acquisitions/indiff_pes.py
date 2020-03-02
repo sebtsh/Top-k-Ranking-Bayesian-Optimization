@@ -91,7 +91,7 @@ def I_batch(chi, x_star, model, num_samples=1000, indifference_threshold = 0.1):
         axis=0)
     # (num_data,)
 
-    return mutual_information, log_p_xstar, log_p_obs, log_p_xstar_obs
+    return mutual_information
 
 
 def get_log_likelihood(fx, normalizer=None, indifference_threshold = 0.0):
@@ -105,7 +105,7 @@ def get_log_likelihood(fx, normalizer=None, indifference_threshold = 0.0):
     if normalizer is None:
         normalizer = num_sample
 
-    mask = np.ones(num_choice)
+    mask = np.eye(num_choice)
     indiff_mat = (1.0 - mask) * indifference_threshold
     
     fx = np.expand_dims(fx, axis=-1)
@@ -118,7 +118,7 @@ def get_log_likelihood(fx, normalizer=None, indifference_threshold = 0.0):
     # (num_sample, num_data, num_choice)
 
     prob_indifference = 1.0 - np.sum(np.exp(log_likelihood_preference), axis=-1, keepdims=True)
-    prob_indifference = np.clip_by_value(prob_indifference, a_min=1e-100, a_max=1.0 - 1e-100)
+    prob_indifference = np.clip(prob_indifference, a_min=1e-100, a_max=1.0 - 1e-100)
     log_likelihood_indifference = np.log(prob_indifference)
     # (num_sample, num_data, 1)
 
