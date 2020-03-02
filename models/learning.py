@@ -246,7 +246,13 @@ def train_model(X, y, num_steps=5000):
     return q_mu, q_var, inputs
 
 
-def train_model_fullcov(X, y, num_inducing, input_dims, num_steps=5000):
+def train_model_fullcov(X,
+                        y,
+                        num_inducing,
+                        obj_low,
+                        obj_high,
+                        lengthscale=1.,
+                        num_steps=5000):
     """
     Returns variational parameters q_mu and q_var (model's learned approximations of the distributions of
     f given the training data X and y), and the corresponding inputs
@@ -255,6 +261,7 @@ def train_model_fullcov(X, y, num_inducing, input_dims, num_steps=5000):
     match exactly to one of the choices in its corresponding X entry
     :param num_steps: int that specifies how many optimization steps to take when training model
     """
+    input_dims = X.shape[2]
     idx_to_val_dict, val_to_idx_dict = populate_dicts(X)
     D_idxs, max_idxs = val_to_idx(X, y, val_to_idx_dict)
 
@@ -262,11 +269,13 @@ def train_model_fullcov(X, y, num_inducing, input_dims, num_steps=5000):
     inputs = np.array([idx_to_val_dict[i] for i in range(n)])
 
     # Initialize variational parameters
-    u = tf.Variable(np.expand_dims(np.linspace(0.0, 1.0, num_inducing), axis=1), dtype=tf.float64)
+    u = tf.Variable(np.random.uniform(low=obj_low, high=obj_high, size=(num_inducing, input_dims)),
+                    name="u",
+                    dtype=tf.float64,
+                    constraint=lambda x: tf.clip_by_value(x, obj_low, obj_high))
     q_mu = tf.Variable(np.zeros([num_inducing, 1]), name="q_mu", dtype=tf.float64)
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(num_inducing), axis=0), name="q_sqrt_latent", dtype=tf.float64)
-    kernel = gpflow.kernels.RBF()
-    kernel.lengthscale.assign(0.05)
+    kernel = gpflow.kernels.RBF(lengthscale=[lengthscale for i in range(input_dims)])
 
     neg_elbo = lambda: -elbo_fullcov(q_mu=q_mu,
                                      q_sqrt_latent=q_sqrt_latent,

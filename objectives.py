@@ -14,7 +14,7 @@ def forrester(x):
 
 def six_hump_camel(x):
     """
-    2-D test function by Molga & Smutnicki (2005), restricted to [-2, 2] on both dimensions. 2 global minima.
+    2-D test function by Molga & Smutnicki (2005), restricted to [-1.5, 1.5] on both dimensions. 2 global minima.
      Has global minimum f(x) = -1.0316, at x = [0.0898, -0.7126] and x = [-0.0898, 0.7126]
     :param x: tensor of shape (..., 2), x1 in [-2, 2], x2 in [-2, 2]
     :return: tensor of shape (..., )
