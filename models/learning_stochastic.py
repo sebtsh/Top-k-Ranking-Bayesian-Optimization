@@ -306,7 +306,7 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
     return D_idxs, max_idxs
 
 
-def train_model_fullcov(X, y, num_inducing, num_steps=5000, indifference_threshold=None):
+def train_model_fullcov(X, y, num_inducing, num_steps=5000, indifference_threshold=0.0):
     """
     if indifference_threshold is None:
         indifference_threshold is trained with maximum likelihood estimation

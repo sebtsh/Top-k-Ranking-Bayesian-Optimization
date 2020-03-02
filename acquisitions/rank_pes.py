@@ -1,6 +1,7 @@
 """
 Contains functions for the Predictive Entropy Search acquisition function.
 Formulation by Nguyen Quoc Phong.
+    for top-k ranking
 """
 
 import numpy as np
@@ -8,7 +9,7 @@ import scipy.special as spmc
 import itertools
 
 
-def I_batch(chi, x_star, model, num_samples=1000, indifference_threshold = 0.0):
+def I_batch(chi, x_star, model, topk=None, num_samples=10000, indifference_threshold = 0.0):
     """
     Predictive Entropy Search acquisition function.
     :param chi: input points in a query, tensor of shape (num_data, num_choice, d)
@@ -19,6 +20,9 @@ def I_batch(chi, x_star, model, num_samples=1000, indifference_threshold = 0.0):
     num_choice = chi.shape[1]
     num_max = x_star.shape[0]
     d = x_star.shape[1]
+
+    if topk is None:
+        topk = num_choice
 
     x_all = np.concatenate([chi.reshape(num_data * num_choice, d), x_star.reshape(num_max, d)], axis=0)
     # (num_data * num_choice + num_max, d)
@@ -39,50 +43,32 @@ def I_batch(chi, x_star, model, num_samples=1000, indifference_threshold = 0.0):
     p_xstar = count / np.sum(count) # note: some xstar has 0 count
     # (num_max,)
 
-    # 3. log p(z|D)
-    assert num_choice <= 6, "num_choice = 7 incurs 5040 permutations, which is too large. This requires random sampling of permutations. For current implementation, we consider all possible permutations."
+    n_permutations = precompute_n_permutations(num_choice, topk)
 
-    is_observation_randomized = (num_choice >= 7)
-    is_indifference_allowed = (indifference_threshold > 1e-200) # non zero
+    # 3. log p(z|D)
+    n_total_permutation = n_permutations[topk] 
+    n_max_permutation = 1000 # cap the number of permutations for computational time
+    is_observation_randomized = (n_total_permutation > n_max_permutation)
 
     if is_observation_randomized:
-        permutations = gen_rand_permutation(num_choice, 500 if is_indifference_allowed else 5000)
+        permutations = get_rand_permutation_k_in_n(num_choice, topk, n_max_permutation, n_permutations)
+        # (n_max_permutation, topk)
     else:
-        permutations = [np.array(order) for order in itertools.permutations(range(num_choice))]
-        # n_observation_type = factorial(num_choice) # = len(permutations)
-
-    if is_indifference_allowed:
-
-        if is_observation_randomized:
-            separators = gen_rand_separator(num_choice, 10)
-        else:
-            separators = gen_separator(num_choice)
-        
-        separator_weights = np.array([get_generator_weight(s) for s in separators], dtype=float)
-    
-    else:
-
-        separators = [ list(range(num_choice+1)) ] 
-        separator_weights = [1.0]
-        # only 1 separator for no indifference
+        permutations = get_all_permutation_k_in_n(num_choice, topk, n_permutations)
+        # (n_total_permutation, topk)
 
     log_p_obs = get_log_likelihood(fchi_samples, 
                         permutations, 
-                        separators, 
-                        separator_weights,
-                        normalizer=num_samples, 
-                        indifference_threshold=indifference_threshold)
+                        normalizer=num_samples)
     # (n_observation_type, num_data)
-    # where n_observation_type = factorial(num_choice) * num_separators
-    #   = len(permutations) * num_separators
-    n_observation_type = log_p_obs.shape[0]
 
-    print("Number of {} observations {} for {} choices: {}".format(
+    n_observation_type = log_p_obs.shape[0] # min(n_max_permutation, n_total_permutation)
+
+    print("Number of {} observations for top-{} in {} choices: {}".format(
             "randomized" if is_observation_randomized else "all possible",
-            "(indifference allowed)" if is_indifference_allowed else "(strictly ordered)",
+            topk,
             num_choice, 
             n_observation_type))
-    print("Number of permutations: {}, separators: {}".format(len(permutations), len(separators)))
 
     # 4. log p(z,xstar| D)
     log_p_xstar_obs = np.zeros([num_max, n_observation_type, num_data])
@@ -95,11 +81,7 @@ def I_batch(chi, x_star, model, num_samples=1000, indifference_threshold = 0.0):
             
             log_p_xstar_obs[max_idx,:,:] = get_log_likelihood(fchi_samples_by_max_idx, 
                                         permutations, 
-                                        separators, 
-                                        separator_weights,
-                                        normalizer=num_samples, 
-                                        indifference_threshold=indifference_threshold)
-
+                                        normalizer=num_samples)
     
     # 5. p(z|D, xstar)
     # remove those xstar with no sample
@@ -128,7 +110,7 @@ def I_batch(chi, x_star, model, num_samples=1000, indifference_threshold = 0.0):
     return mutual_information, log_p_xstar, log_p_obs, log_p_xstar_obs
 
 
-def get_log_likelihood(fx, permutations, separators, separator_weights, normalizer=None, indifference_threshold = 0.0):
+def get_log_likelihood(fx, permutations, normalizer=None):
     """
     fx: (num_sample,num_data,num_choice)
     """
@@ -140,28 +122,25 @@ def get_log_likelihood(fx, permutations, separators, separator_weights, normaliz
         normalizer = num_sample
 
     n_permutation = len(permutations)
-    n_separator = len(separators)
-
-    num_observation = n_separator * n_permutation
-    all_log_likelihood = np.zeros([num_observation, num_data])
+    all_log_likelihood = np.zeros([n_permutation, num_data])
 
     for i,order in enumerate(permutations):
         log_likelihood = get_log_likelihood_given_order(
                                 fx, 
                                 order, 
-                                separators, 
-                                separator_weights, 
-                                normalizer, 
-                                indifference_threshold)
-        # (num_separator, num_data)
+                                normalizer)
+        # (num_data)
 
-        all_log_likelihood[(i*n_separator):((i+1)*n_separator),:] = log_likelihood
+        all_log_likelihood[i,:] = log_likelihood
 
     return all_log_likelihood
 
 
-def get_log_likelihood_given_order(fx, order, separators, separator_weights, normalizer=None, indifference_threshold = 0.0):
+def get_log_likelihood_given_order(fx, order, normalizer=None):
     """
+    order: indices of sorted preference (ascending) for a subset of choices (k in top-k)
+        numpy array of size k
+
     given an order of preference of fx, compute the likelihood
         if indifference_threshold > 0.0
             consider all possible indifference observations
@@ -173,291 +152,93 @@ def get_log_likelihood_given_order(fx, order, separators, separator_weights, nor
     num_sample = fx.shape[0]
     num_data = fx.shape[1]
     num_choice = fx.shape[2]
+    k = order.shape[0]
 
     if normalizer is None:
         normalizer = num_sample
 
+    log_likelihood = np.zeros([num_sample, num_data])
 
-    all_log_likelihood = np.zeros([len(separators), num_data])
+    choice_idxs = np.array(list(set(range(num_choice)).difference(set(order))), dtype=int)
 
-    for sep_idx, separator in enumerate(separators):
-    
-        log_likelihood = np.zeros(num_data)
-        for i in range(1,len(separator)):
+    for i in range(k):
+        choice_idxs = np.concatenate([[order[i]], choice_idxs], axis=0)
+        selected_idx = order[i]
 
-            previous, current = separator[i-1], separator[i]
+        log_likelihood += fx[:,:,selected_idx] - spmc.logsumexp(fx[:,:,choice_idxs], axis=-1)
+        # (num_sample, num_data)
 
-            if current - previous > 1:
-                # when no preference exists (i.e., indifferent)
-                choice_idxs = order[previous:current]
-                selected_idx = -1
-            
-                log_likelihood_i = get_log_likelihood_given_preference(
-                                            fx, 
-                                            choice_idxs, 
-                                            selected_idx, 
-                                            normalizer, 
-                                            indifference_threshold)
-                # (num_data,)
-
-                log_likelihood += log_likelihood_i
-
-
-            if current < num_choice:
-                # when preference exists
-                nxt = separator[i+1]
-
-                log_likelihood_i = np.zeros([nxt - current, num_data])
-
-                for idx,j in enumerate(order[current:nxt]):
-                    choice_idxs = np.concatenate([ order[:current], [j] ], axis=0)
-                    selected_idx = len(choice_idxs) - 1
-
-                    log_likelihood_i[idx,:] = get_log_likelihood_given_preference(
-                                            fx, 
-                                            choice_idxs, 
-                                            selected_idx, 
-                                            normalizer, 
-                                            indifference_threshold)
-                    # (num_data,)
-
-                log_likelihood += spmc.logsumexp(log_likelihood_i, axis=0)
-
-        # due to duplicating counting of indifference case
-        log_likelihood -= np.log(separator_weights[sep_idx])
-
-        all_log_likelihood[sep_idx,:] = log_likelihood
-
-    return all_log_likelihood
-    # (num_separator, num_data)
-
-
-def get_log_likelihood_given_preference(fx, choice_idxs, selected_idx, normalizer=None, indifference_threshold = 0.0):
     """
-    fx: (num_sample,num_data, num_choice)
-    choice_idxs: subset of range(num_choice)
-    selected_idx: x[:,choice_idxs[ selected_idx ],:] is selected
+    p(x0 > x1 > x2|fx) = p(x0 > x1 and x0 > x2|fx) p(x1 > x2|fx)
+    p(x0 > x1 > x2) = sum_fx p(x0 > x1 > x2|fx)
     """
-    num_choice = choice_idxs.shape[0]
-    
-    assert choice_idxs.shape[0] > 1, "need at least 2 choices for preference"
-
-    num_sample = fx.shape[0]
-    num_data = fx.shape[1]
-    
-    if normalizer is None:
-        normalizer = num_sample
-
-    fx = fx[:,:,choice_idxs]
-
-    mask_mat = np.eye(num_choice)
-    indifference_mat = (1.0 - mask_mat) * indifference_threshold
-
-    if selected_idx >= 0:
-        
-        # add threshold for choices different from selected_idx
-        indifference_vec = indifference_mat[selected_idx,:]
-        fx = fx + indifference_threshold * indifference_vec
-
-        max_f = fx[:,:,selected_idx] # (num_sample, num_data)
-
-        log_likelihood = max_f - spmc.logsumexp(fx, axis=-1)
-        # num_sample, num_data
-
-    else:
-        # indifference to all choices
-        fx = np.expand_dims(fx, axis=-1)
-        # (num_sample, num_data, num_choice,1)
-
-        selected_f = fx * mask_mat
-        base_f = fx + indifference_threshold * indifference_mat
-
-        choice_log_likelihood = np.sum(selected_f, axis=-2) - spmc.logsumexp(base_f, axis=-2)
-        # num_sample, num_data, num_choice
-        all_choice_log_likelihood = spmc.logsumexp(choice_log_likelihood, axis=-1)
-        # num_sample, num_data
-
-        indifference_likelihood = np.clip(1.0 - np.exp(all_choice_log_likelihood), a_min=1e-50, a_max=1.0 - 1e-50)
-        log_likelihood = np.log(indifference_likelihood)
-        # num_sample, num_data
-
-    # average over samples
     log_likelihood = spmc.logsumexp(log_likelihood - np.log(normalizer), axis=0)
-    # num_data
+    # (num_data)
 
     return log_likelihood
+    # (num_data)
 
 
-def get_generator_weight(separator):
-    """
-    0 | 1 2 and 0 | 2 1 are treated the same
-    as there is no preference (i.e., indifference) 
-    between 1 and 2 in this case
-    """
-    return np.prod(spmc.factorial( np.diff(separator) ))
-
-
-def gen_separator_at(idx, num_choice):
-    # idx in [0, 2**(num_choice-1)]
-    j = 0
-    last_digit = -1
-    seperator = []
-
-    while idx > 0:
-
-        if idx % 2 != last_digit:
-            last_digit = idx % 2
-            seperator.append(j)
-        
-        idx = int(idx / 2)
-    
-        j+= 1
-
-    if j < num_choice:
-        seperator.append(j)
-    
-    seperator.append(num_choice)
-    return seperator
-
-
-def gen_separator(num_choice):
-    """
-    gen_separator(3) returns [[0, 3], [0, 1, 3], [0, 1, 2, 3], [0, 2, 3]]
-    [0,1,3] means index_0 < (less preferred to) (index_1, index_2) 
-    where (index_1, index_2) means no preference (i.e., indifference) between index_1 and index_2
-        denoted as: index_0 | index_1 index_2
-    Hence the separators for num_choice = 3 are:
-    [0, 3]:       |0 1 2|: no preference at all
-    [0, 1, 3]:    |0|1 2|
-    [0, 1, 2, 3]: |0|1|2|: fully-ordered
-    [0, 2, 3]:    |0 1|2|
-    """
-
-    all_seps = []
-
-    for i in range( 0, 2**(num_choice-1) ):
-        all_seps.append( gen_separator_at(i, num_choice) )
-
-    return all_seps
-
-
-def gen_rand_separator(num_choice, size):
-    idxs = np.random.randint(0, 2**(num_choice-1), size)
-    return [gen_separator_at(i, num_choice) for i in idxs]
-
-
-def gen_kth_permutation(n, k, factorials):
+def get_ith_permutation_k_in_n(n, k, i, n_permutations):
+    # return the i-th subset of size k in a set of size n
+    # n! / (n-k)!
+    # n_permutations[i]: choose i in n
+    # n_permutations[k]: choose k in n 
 
     options = list(range(n))
-    x = np.zeros(n, dtype=int)
-    
-    i = n-1
-    while len(options):
-        idx = int(k / factorials[i])
-        
-        x[n-1-i] = options[idx]
-        del options[idx]
+    x = np.zeros(k, dtype=int)
+    idx = i
 
-        k = k - idx * factorials[i]
-        i -= 1
+    for j in reversed(range(0,k)):
+
+        opt_i = int(idx / n_permutations[j])
+
+        x[k-1-j] = options[opt_i]
+        del options[opt_i]
+
+        idx -= opt_i * n_permutations[j]
 
     return x
 
 
-def gen_rand_permutation(n, size):
-    factorials = np.ones(n+1, dtype=int)
-    for i in range(1,n+1):
-        factorials[i] = factorials[i-1] * i
+def precompute_n_permutations(n, k):
+    assert k <= n
+
+    n_permutations = np.ones(k+1, dtype=int)
+    # n_permutations[i]: choose i in n-(k-i)
+    #   = factorials[n-(k-i)] / factorials[n-(k-i)-i]
+    #   = factorials[n-k+i] / factorials[n-k]
+    #   = n_permutations[i-1] * (n-k+i) / (n-k)
+    n_permutations[1] = n-(k-1)
+
+    for i in range(2,k+1):
+        n_permutations[i] = n_permutations[i-1] * (n-k+i)
     
-    ks = np.random.randint(0, factorials[n], size)
-
-    return [gen_kth_permutation(n, k, factorials) for k in ks]
+    return n_permutations
 
 
+def get_all_permutation_k_in_n(n, k, n_permutations = None):
+    assert k <= n
 
-# TODO: test if gpflow can predict_f_samples of 2 x that are identical with identical samples?
-# it doesn't return identical samples!!
+    if n_permutations is None:
+        n_permutations = precompute_n_permutations(n, k)
+    permutations = np.zeros([n_permutations[k], k], dtype=int)
 
+    for i in range(n_permutations[k]):
+        permutations[i,:] = get_ith_permutation_k_in_n(n, k, i, n_permutations)
 
+    return permutations
+    
+    
+def get_rand_permutation_k_in_n(n, k, size, n_permutations = None):
+    assert k <= n 
 
-# def get_log_likelihood_full(x, fx, sorted_idxs, normalizer=None):
-#     """
-#     x: (num_data, num_choice, xdim)
-#     fx: (num_sample,num_data, num_choice)
-#     sorted_idxs: (num_choice)
-#     """
-#     num_sample = fx.shape[0]
-#     num_data = fx.shape[1]
-#     num_choice = fx.shape[2]
+    if n_permutations is None:
+        n_permutations = precompute_n_permutations(n, k)
+    permutations = np.zeros([size, k], dtype=int)
+    
+    randi = np.random.randint(low=0, high=n_permutations[k], size=size)
+    for i,j in enumerate(randi):
+        permutations[i,:] = get_ith_permutation_k_in_n(n, k, j, n_permutations)
 
-#     if normalizer is None:
-#         normalizer = num_sample
-
-#     log_likelihood = np.zeros(num_data)
-
-#     for max_idx in range(1, num_choice):
-#         max_f = fx[:,:,sorted_idxs[max_idx]].reshape(num_samples, num_data, 1)
-#         base_f = fx[:,:,sorted_idxs[:(max_idx+1)]].reshape(num_sample, num_data, max_idx+1)
-
-#         log_likelihood_i = np.squeeze(max_f - spmc.logsumexp(base_f, axis=1, keepdims=True), axis=-1)
-#         # num_sample, num_data
-
-#         # average over samples
-#         log_likelihood_i = spmc.logsumexp(log_likelihood_i - np.log(normalizer), axis=0)
-#         # num_data
-
-#         log_likelihood += log_likelihood_i
-#         # (num_data)
-
-#     return log_likelihood
-
-
-
-# def get_log_likelihood(x, fx, sorted_idxs, normalizer=None):
-#     """
-#     x: (num_data, num_choice, xdim)
-#     fx: (num_sample,num_data, num_choice)
-#     sorted_idxs: (num_data, num_choice)
-#     """
-#     num_sample = fx.shape[0]
-#     num_data = sorted_idxs.shape[0]
-#     num_choice = sorted_idxs.shape[1]
-
-#     if normalizer is None:
-#         normalizer = num_sample
-
-#     log_likelihood = np.zeros(num_data)
-
-#     for max_idx in range(1, num_choice):
-        
-#         idx_i = np.tile(list(range(num_data)).reshape(-1,1), reps=(1,num_data)).flatten()
-#         idx_j = sorted_idxs[:,:(max_idx+1)].flatten()
-
-#         max_f = fx[:,list(range(num_data)), sorted_idxs[max_idx]].reshape(num_sample,num_data,1)
-#         base_f = fx[:,idx_i, idx_j].reshape(num_sample,num_data,max_idx+1)
-
-#         log_likelihood_i = np.squeeze(max_f - spmc.logsumexp(base_f, axis=1, keepdims=True), axis=-1)
-#         # num_sample, num_data
-
-#         # average over samples
-#         log_likelihood_i = spmc.logsumexp(log_likelihood_i - np.log(normalizer), axis=0)
-#         # num_data
-
-#         log_likelihood += log_likelihood_i
-
-#     return log_likelihood
-   
-"""
-given a sorted idxs
-the indifference can happen multiple times and between consecutive idxs
-0 1 2 3 4 5
-indifference: (0 1) (2 3 4) 5
-or (0 1) 2 3 (4 5)
-using list of lists:
-    (0 1) (2) (3) (4 5)
-how to generate sub lists:
-    number of separators: 1,2,...,n-1 where n is number of choices
-    choose n_separator in (n-1) space between choices
-        + indifference all
-"""
-
+    return permutations
