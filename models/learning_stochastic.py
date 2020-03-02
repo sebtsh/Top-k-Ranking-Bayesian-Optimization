@@ -29,7 +29,6 @@ import tensorflow_probability as tfp
 import gpflow
 from gpflow.utilities import set_trainable
 
-import objectives, observation_model
 
 def elbo_fullcov(q_mu, 
                 q_sqrt_latent, 
