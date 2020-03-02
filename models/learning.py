@@ -246,7 +246,15 @@ def train_model(X, y, num_steps=5000):
     return q_mu, q_var, inputs
 
 
-def train_model_fullcov(X, y, num_inducing, num_steps=5000):
+def train_model_fullcov(X, y, num_inducing, input_dims, num_steps=5000):
+    """
+    Returns variational parameters q_mu and q_var (model's learned approximations of the distributions of
+    f given the training data X and y), and the corresponding inputs
+    :param X: np array with shape (num_data, num_choices, input_dims). Ordinal data
+    :param y: np array with shape (num_data, input_dims). Most preferred input for each set of inputs. Each y value must
+    match exactly to one of the choices in its corresponding X entry
+    :param num_steps: int that specifies how many optimization steps to take when training model
+    """
     idx_to_val_dict, val_to_idx_dict = populate_dicts(X)
     D_idxs, max_idxs = val_to_idx(X, y, val_to_idx_dict)
 

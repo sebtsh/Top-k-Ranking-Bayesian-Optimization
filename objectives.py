@@ -14,9 +14,9 @@ def forrester(x):
 
 def six_hump_camel(x):
     """
-    2-D test function by Molga & Smutnicki (2005). Has 6 local minima, 2 of which are global.
+    2-D test function by Molga & Smutnicki (2005), restricted to [-2, 2] on both dimensions. 2 global minima.
      Has global minimum f(x) = -1.0316, at x = [0.0898, -0.7126] and x = [-0.0898, 0.7126]
-    :param x: tensor of shape (..., 2), x1 in [-3, 3], x2 in [-2, 2]
+    :param x: tensor of shape (..., 2), x1 in [-2, 2], x2 in [-2, 2]
     :return: tensor of shape (..., )
     """
     x1 = x[..., 0]
@@ -45,6 +45,19 @@ def hartmann3d(x):
 
     x_repeat = np.repeat(np.expand_dims(x, axis=-2), 4, axis=-2)
     return -np.sum(alpha * np.exp(-np.sum(A * ((x_repeat - P) ** 2), axis=-1)), axis=-1)
+
+
+def objective_get_f_neg(x, objective):
+    """
+    Get objective function values of inputs. Note that this returns the negative of the above objective functions,
+    as observation_model.gen_observation_from_f takes it that more positive functions values are preferred, while we
+    are interested in finding the minima of the above functions.
+    :param x: tensor of shape (..., num_choices, input_dims)
+    :param objective: function that takes tensor of shape (..., input_dims) and outputs tensor of shape (..., ) with
+    the objective function values
+    :return: tensor of shape (..., 1)
+    """
+    return -np.expand_dims(objective(x), axis=-1)
 
 
 def objective_get_y(x, objective):

@@ -1,1 +1,1 @@
-from . import (acquisitions, models, fourier_features, observation_model)
+from . import (acquisitions, models, fourier_features, objectives, observation_model)

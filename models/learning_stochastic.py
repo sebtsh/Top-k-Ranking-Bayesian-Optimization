@@ -12,18 +12,14 @@
     sample maximizers:
         change observations from inducing input, inducing variables
         to distribution of inducing variables
-"""
 
-
-
-
-"""
 Given ordinal (preference) data consisting of sets of input points and a most preferred input point for every such set,
 the train_model function learns variational parameters that approximate the distribution of a latent function f over
 all input points present in the data, which can be used to construct GP models to approximate f over the entire input
 space.
 Formulation by Nguyen Quoc Phong.
 """
+
 import time 
 
 import numpy as np
@@ -32,7 +28,6 @@ import tensorflow_probability as tfp
 
 import gpflow
 from gpflow.utilities import set_trainable
-
 
 
 def elbo_fullcov(q_mu, 
@@ -99,7 +94,6 @@ def elbo_fullcov(q_mu,
         - logdet_Kmm
         - tf.transpose(posterior_inducing_samples, perm= [0,2,1]) @ invKmm @ posterior_inducing_samples
     )
-
 
     def body(i, likelihood): 
         idxs = tf.squeeze(D_idxs.read(i))
@@ -180,7 +174,6 @@ def elbo_fullcov(q_mu,
     return elbo
 
 
-
 def cholesky_matrix_inverse(A):
     """
     :param A: Symmetric positive-definite matrix, tensor of shape (n, n)
@@ -211,7 +204,6 @@ def p_f_given_u(inducing_vars, inducing_inputs, kernel, inputs, invKmm_prior):
     # (num_inputs, num_inputs)
 
     return f_mean, f_cov
-
 
 
 def q_f(q_mu, q_sqrt_latent, inducing_variables, kernel, inputs):
@@ -286,7 +278,6 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
 
     max_idxs = tf.constant(max_idxs)
 
-
     D_idxs = tf.TensorArray(dtype=tf.int32, size=k, name='D_idxs', infer_shape=False, clear_after_read=False)
     
     for i in range(k):
@@ -306,13 +297,30 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
     return D_idxs, max_idxs
 
 
-def train_model_fullcov(X, y, num_inducing, num_steps=5000, indifference_threshold=0.0):
+def train_model_fullcov(X,
+                        y,
+                        num_inducing,
+                        obj_low,
+                        obj_high,
+                        lengthscale=1.,
+                        num_steps=5000,
+                        indifference_threshold=None):
     """
     if indifference_threshold is None:
         indifference_threshold is trained with maximum likelihood estimation
     else:
         indifference_threshold is fixed
+    :param X: np array with shape (num_data, num_choices, input_dims). Ordinal data
+    :param y: np array with shape (num_data, input_dims). Most preferred input for each set of inputs. Each y value must
+    match exactly to one of the choices in its corresponding X entry
+    :param num_inducing: number of inducing variables to use
+    :param obj_low: int. Floor of possible inducing point value in each dimension
+    :param obj_high: int. Floor of possible inducing point value in each dimension
+    :param lengthscale: float. Lengthscale to initialize RBF kernel with
+    :param num_steps: int that specifies how many optimization steps to take when training model
+    :param indifference_threshold:
     """
+    input_dims = X.shape[2]
     idx_to_val_dict, val_to_idx_dict = populate_dicts(X)
     D_idxs, max_idxs = val_to_idx(X, y, val_to_idx_dict)
 
@@ -320,11 +328,12 @@ def train_model_fullcov(X, y, num_inducing, num_steps=5000, indifference_thresho
     inputs = np.array([idx_to_val_dict[i] for i in range(n)])
 
     # Initialize variational parameters
-    u = tf.Variable(np.expand_dims(np.linspace(0.0, 1.0, num_inducing), axis=1), dtype=tf.float64)
+    u = tf.Variable(np.random.uniform(low=obj_low, high=obj_high, size=(num_inducing, input_dims)),
+                    name="u",
+                    dtype=tf.float64)
     q_mu = tf.Variable(np.zeros([num_inducing, 1]), name="q_mu", dtype=tf.float64)
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(num_inducing), axis=0), name="q_sqrt_latent", dtype=tf.float64)
-    kernel = gpflow.kernels.RBF()
-    kernel.lengthscale.assign(0.05)
+    kernel = gpflow.kernels.RBF(lengthscale=[lengthscale for i in range(input_dims)])
 
     is_threshold_trainable = (indifference_threshold is None)
 
@@ -366,9 +375,10 @@ def train_model_fullcov(X, y, num_inducing, num_steps=5000, indifference_thresho
             
             start_time = time.time()
 
-
-    return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), u, inputs, kernel, indifference_threshold # q_mu and q_sqrt
-
+    if is_threshold_trainable:
+        return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), u, inputs, kernel, indifference_threshold  # q_mu and q_sqrt
+    else:
+        return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), u, inputs, kernel  # q_mu and q_sqrt
 
 
 def init_SVGP_fullcov(q_mu, q_sqrt, inducing_variables, kernel, likelihood):
@@ -397,5 +407,3 @@ def init_SVGP_fullcov(q_mu, q_sqrt, inducing_variables, kernel, likelihood):
     set_trainable(model.inducing_variable.Z, False)
 
     return model
-
-
