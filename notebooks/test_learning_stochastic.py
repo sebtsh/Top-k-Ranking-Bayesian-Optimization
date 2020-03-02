@@ -184,9 +184,11 @@ num_discrete_points = 10000
 def train_and_visualize(X, y, num_inducing, title, indifference_threshold=0.0):
     
     # Train model with data
-    q_mu, q_sqrt, u, inputs, k, indifference_threshold = PBO.models.learning_stochastic.train_model_fullcov(
+    q_mu, q_sqrt, u, inputs, k = PBO.models.learning_stochastic.train_model_fullcov(
                                                 X, y, 
                                                 num_inducing=num_inducing,
+                                                obj_low=0.,
+                                                obj_high=1.,
                                                 num_steps=num_train,
                                                 indifference_threshold=indifference_threshold)
 
@@ -259,10 +261,12 @@ for run in range(num_runs):
         # Sample maximizers
         print("Evaluation %s: Sampling maximizers" % (evaluation))
         maximizers = PBO.fourier_features.sample_maximizers(X=inducing_vars,
-                                                            y=u_mean,
                                                             count=num_maximizers,
+                                                            n_init=10,
                                                             D=100,
-                                                            model=model)
+                                                            model=model,
+                                                            num_steps=100)
+
         print("Maximizer samples: {}".format(maximizers))
 
         # Calculate PES value I for each possible next query
@@ -270,17 +274,27 @@ for run in range(num_runs):
         I_vals = PBO.acquisitions.pes.I_batch(samples, maximizers, model)
         # (num_samples * num_inputs)
 
-        I_vals1, log_p_xstar, log_p_obs, log_p_xstar_obs\
-                 = PBO.acquisitions.rank_pes.I_batch(
+        I_vals1 = PBO.acquisitions.rank_pes.I_batch(
                                 samples.numpy(), 
                                 maximizers.numpy(), 
                                 model, 
                                 num_samples=10000)
 
+        I_vals2 = PBO.acquisitions.indiff_pes.I_batch(
+                                samples.numpy(), 
+                                maximizers.numpy(), 
+                                model, 
+                                num_samples=10000,
+                                indifference_threshold = indifference_threshold)
+
         # (num_samples * num_inputs)
         print("I_vals: {}".format(I_vals))
         print("I_vals1: {}".format(I_vals1))
-        print("Difference in I_vals RMS: {}".format( np.sqrt(np.mean(np.square(I_vals - I_vals1)))) )
+        print("I_vals2: {}".format(I_vals2))
+        
+        print("Difference in I_vals RMS: {} {}".format( 
+                np.sqrt(np.mean(np.square(I_vals - I_vals1))),
+                np.sqrt(np.mean(np.square(I_vals - I_vals2))) ))
         raise Exception("test rank_pes")
 
 
