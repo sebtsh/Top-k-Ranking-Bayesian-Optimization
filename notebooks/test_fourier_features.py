@@ -117,7 +117,7 @@ for i in range(count):
 ax.set_title("Samples from GP using fourier features")
 
 
-maximizers, max_idxs, x_star = PBO.fourier_features.sample_maximizers(u, count, n_init=50, D=100, model=model, min_val=-0.1, max_val=1.1, num_steps=500)
+maximizers = PBO.fourier_features.sample_maximizers(u, count, n_init=50, D=100, model=model, min_val=-0.1, max_val=1.1, num_steps=500)
 # (count,xdim)
 
 maximizers = maximizers.numpy()
