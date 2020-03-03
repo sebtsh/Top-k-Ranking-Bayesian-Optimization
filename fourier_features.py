@@ -40,6 +40,51 @@ def sample_fourier_features(X, kernel, D=100):
     return fourier_features(X, W, b, kernel), W, b  # (count, n, D)
 
 
+# def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
+#     """
+#     Samples from distribution q(theta|D) = /int p(theta|y)p(y|f)q(f|D) df dy
+#     :param phi: Fourier features tensor with shape (count, n, D)
+#     :param q_mu: tensor of shape (n, 1)
+#     :param q_sqrt: tensor of shape (1, n, n). Lower triangular matrix
+#     :param likelihood_var: scalar. Variance of likelihood function p(y|f) from model
+#     :return: tensor with shape (count, D, 1)
+#     """
+#     n = phi.shape[1]
+#     D = phi.shape[2]
+
+#     q_var = q_sqrt @ tf.linalg.matrix_transpose(q_sqrt)  # (1, n, n)
+#     noise_I_D = tf.expand_dims(likelihood_var * tf.eye(D, dtype=tf.float64), axis=0)
+#     noise_I_n = tf.expand_dims(likelihood_var * tf.eye(n, dtype=tf.float64), axis=0)
+
+#     A = (tf.linalg.matrix_transpose(phi) @ phi) + noise_I_D
+#     A_inv = tf.linalg.inv(A)  # (count, D, D)
+#     """
+#     TODO: matrix rank(A) = n < D if n < D
+#         so need to handle the inversion differently
+#     """
+#     M = A_inv @ tf.linalg.matrix_transpose(phi)  # (count, D, n)
+
+#     theta_mean = tf.squeeze(M @ tf.expand_dims(q_mu, axis=0), axis=-1)  # (count, D)
+#     theta_var = A_inv * likelihood_var + M @ (noise_I_n + q_var) @ tf.linalg.matrix_transpose(M)
+
+#     """
+#     TODO: set likelihood_var = 0.0
+#     theta_var = M @ q_var @ tf.linalg.matrix_transpose(M)
+#         = M @ q_sqrt @ tf.linalg.matrix_transpose(q_sqrt) @ tf.linalg.matrix_transpose(M)
+#     Hence, we can sample from a standard multivariate Normal to obtain sample z
+#     and transform
+#         theta = M @ q_sqrt @ z + theta_mean
+#     """
+
+#     theta_dist = tfp.distributions.MultivariateNormalFullCovariance(loc=theta_mean,
+#                                                                     covariance_matrix=theta_var)
+
+#     theta = tf.expand_dims(tf.dtypes.cast(theta_dist.sample(), dtype=tf.float64), axis=-1)  # (count, D, 1)
+
+#     return theta
+
+
+
 def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
     """
     Samples from distribution q(theta|D) = /int p(theta|y)p(y|f)q(f|D) df dy
@@ -49,23 +94,29 @@ def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
     :param likelihood_var: scalar. Variance of likelihood function p(y|f) from model
     :return: tensor with shape (count, D, 1)
     """
+    count = phi.shape[0]
     n = phi.shape[1]
     D = phi.shape[2]
 
-    q_var = q_sqrt @ tf.linalg.matrix_transpose(q_sqrt)  # (1, n, n)
-    noise_I_D = tf.expand_dims(likelihood_var * tf.eye(D, dtype=tf.float64), axis=0)
-    noise_I_n = tf.expand_dims(likelihood_var * tf.eye(n, dtype=tf.float64), axis=0)
+    standard_normal = tfp.distributions.MultivariateNormalDiag(
+            loc=tf.zeros(n, dtype=tf.float64), 
+            scale_diag=tf.ones(n, dtype=tf.float64))
+    standard_normal_samples = standard_normal.sample(count)
+    # (count, n)
 
-    A = (tf.linalg.matrix_transpose(phi) @ phi) + noise_I_D
-    A_inv = tf.linalg.inv(A)  # (count, D, D)
-    M = A_inv @ tf.linalg.matrix_transpose(phi)  # (count, D, n)
+    q_samples = q_sqrt @ tf.expand_dims(standard_normal_samples, axis=-1) + q_mu
+    # (count,n,1)
 
-    theta_mean = tf.squeeze(M @ tf.expand_dims(q_mu, axis=0), axis=-1)  # (count, D)
-    theta_var = A_inv * likelihood_var + M @ (noise_I_n + q_var) @ tf.linalg.matrix_transpose(M)
+    transposed_phi = tf.linalg.matrix_transpose(phi)
+    # (count, D, n)
 
-    theta_dist = tfp.distributions.MultivariateNormalFullCovariance(loc=theta_mean,
-                                                                    covariance_matrix=theta_var)
-    theta = tf.expand_dims(tf.dtypes.cast(theta_dist.sample(), dtype=tf.float64), axis=-1)  # (count, D, 1)
+    transform_mat = tf.cond(n >= D, 
+        true_fn = lambda : tf.linalg.inv(transposed_phi @ phi) @ transposed_phi, 
+        false_fn = lambda: transposed_phi @ tf.linalg.inv(phi @ transposed_phi) )
+    # (count, D, n)
+
+    theta = transform_mat @ q_samples
+    # (count, D, 1)
 
     return theta
 
@@ -107,6 +158,7 @@ def sample_maximizers(X, count, n_init, D, model, num_steps=3000):
                                            maxval=1.,
                                            dtype=tf.dtypes.float64),
                          constraint=lambda x: tf.clip_by_value(x, 0., 1.))
+
     loss = lambda: construct_maximizer_objective(x_star)
 
     prev_loss = loss().numpy()
@@ -120,4 +172,12 @@ def sample_maximizers(X, count, n_init, D, model, num_steps=3000):
             break
         prev_loss = current_loss
 
-    return tf.reduce_max(x_star, axis=1)
+    fvals = tf.reduce_sum(fourier_features(x_star, W, b, model.kernel) @ theta, axis=-1)
+    # (count, n_init)
+    max_idxs = tf.transpose(tf.stack([tf.range(count, dtype=tf.int64), 
+                         tf.math.argmax(fvals, axis=1)]))
+
+    maximizers = tf.gather_nd(x_star, 
+                indices=max_idxs)
+
+    return maximizers, x_star, max_idxs
