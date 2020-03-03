@@ -126,7 +126,7 @@ def I_batch(chi_batch, x_star, model):
     return np.array([I(chi, x_star, model) for chi in chi_batch])
 
 
-def sample_inputs(current_inputs, num_samples, num_choices, min_val=0.0, max_val=1.0):
+def sample_inputs(current_inputs, num_samples, num_choices, min_val, max_val):
     """
     Uniformly samples random inputs to query objective function. Sampled inputs must have
     existing data points among the choices, otherwise the learned function values for the
@@ -137,6 +137,7 @@ def sample_inputs(current_inputs, num_samples, num_choices, min_val=0.0, max_val
     :param num_choices: int, number of choices in an input query
     :param min_val: float, minimum value of sampled random values
     :param max_val: float, max value of sampled random values
+    :return: tensor of shape (num_samples*num_inputs, num_choices, input_dims)
     """
     num_inputs = current_inputs.shape[0]
     input_dims = current_inputs.shape[1]

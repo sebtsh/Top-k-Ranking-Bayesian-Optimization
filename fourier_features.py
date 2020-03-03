@@ -40,51 +40,6 @@ def sample_fourier_features(X, kernel, D=100):
     return fourier_features(X, W, b, kernel), W, b  # (count, n, D)
 
 
-# def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
-#     """
-#     Samples from distribution q(theta|D) = /int p(theta|y)p(y|f)q(f|D) df dy
-#     :param phi: Fourier features tensor with shape (count, n, D)
-#     :param q_mu: tensor of shape (n, 1)
-#     :param q_sqrt: tensor of shape (1, n, n). Lower triangular matrix
-#     :param likelihood_var: scalar. Variance of likelihood function p(y|f) from model
-#     :return: tensor with shape (count, D, 1)
-#     """
-#     n = phi.shape[1]
-#     D = phi.shape[2]
-
-#     q_var = q_sqrt @ tf.linalg.matrix_transpose(q_sqrt)  # (1, n, n)
-#     noise_I_D = tf.expand_dims(likelihood_var * tf.eye(D, dtype=tf.float64), axis=0)
-#     noise_I_n = tf.expand_dims(likelihood_var * tf.eye(n, dtype=tf.float64), axis=0)
-
-#     A = (tf.linalg.matrix_transpose(phi) @ phi) + noise_I_D
-#     A_inv = tf.linalg.inv(A)  # (count, D, D)
-#     """
-#     TODO: matrix rank(A) = n < D if n < D
-#         so need to handle the inversion differently
-#     """
-#     M = A_inv @ tf.linalg.matrix_transpose(phi)  # (count, D, n)
-
-#     theta_mean = tf.squeeze(M @ tf.expand_dims(q_mu, axis=0), axis=-1)  # (count, D)
-#     theta_var = A_inv * likelihood_var + M @ (noise_I_n + q_var) @ tf.linalg.matrix_transpose(M)
-
-#     """
-#     TODO: set likelihood_var = 0.0
-#     theta_var = M @ q_var @ tf.linalg.matrix_transpose(M)
-#         = M @ q_sqrt @ tf.linalg.matrix_transpose(q_sqrt) @ tf.linalg.matrix_transpose(M)
-#     Hence, we can sample from a standard multivariate Normal to obtain sample z
-#     and transform
-#         theta = M @ q_sqrt @ z + theta_mean
-#     """
-
-#     theta_dist = tfp.distributions.MultivariateNormalFullCovariance(loc=theta_mean,
-#                                                                     covariance_matrix=theta_var)
-
-#     theta = tf.expand_dims(tf.dtypes.cast(theta_dist.sample(), dtype=tf.float64), axis=-1)  # (count, D, 1)
-
-#     return theta
-
-
-
 def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
     """
     Samples from distribution q(theta|D) = /int p(theta|y)p(y|f)q(f|D) df dy
@@ -121,7 +76,7 @@ def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
     return theta
 
 
-def sample_maximizers(X, count, n_init, D, model, num_steps=3000):
+def sample_maximizers(X, count, n_init, D, model, min_val, max_val, num_steps=3000):
     """
     Samples from the posterior over the global maximizer using the method by Shah & Ghahramani (2015). Approximates
     the RBF kernel with its Fourier dual. Samples random Fourier features, constructs a linear model and computes
@@ -133,8 +88,9 @@ def sample_maximizers(X, count, n_init, D, model, num_steps=3000):
     initializing points after optimization, so that each function sample will have one maximizer returned
     :param D: number of Fourier features to use
     :param model: gpflow model that uses the RBF kernel and has been optimized
+    :param min_val: float, min value that a maximizer can take
+    :param max_val: float, max value that a maximizer can take
     :param num_steps: int that specifies how many optimization steps to take
-    :param variational: bool. If usin
     :return: tensor of shape (count, d)
     """
     d = X.shape[1]
@@ -154,11 +110,10 @@ def sample_maximizers(X, count, n_init, D, model, num_steps=3000):
     # Compute x_star using gradient based methods
     optimizer = tf.keras.optimizers.Adam()
     x_star = tf.Variable(tf.random.uniform(shape=(count, n_init, d),
-                                           minval=0.,
-                                           maxval=1.,
+                                           minval=min_val,
+                                           maxval=max_val,
                                            dtype=tf.dtypes.float64),
-                         constraint=lambda x: tf.clip_by_value(x, 0., 1.))
-
+                         constraint=lambda x: tf.clip_by_value(x, min_val, max_val))
     loss = lambda: construct_maximizer_objective(x_star)
 
     prev_loss = loss().numpy()

@@ -330,7 +330,8 @@ def train_model_fullcov(X,
     # Initialize variational parameters
     u = tf.Variable(np.random.uniform(low=obj_low, high=obj_high, size=(num_inducing, input_dims)),
                     name="u",
-                    dtype=tf.float64)
+                    dtype=tf.float64,
+                    constraint=lambda x: tf.clip_by_value(x, obj_low, obj_high))
     q_mu = tf.Variable(np.zeros([num_inducing, 1]), name="q_mu", dtype=tf.float64)
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(num_inducing), axis=0), name="q_sqrt_latent", dtype=tf.float64)
     kernel = gpflow.kernels.RBF(lengthscale=[lengthscale for i in range(input_dims)])
