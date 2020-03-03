@@ -70,7 +70,7 @@ def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
     return theta
 
 
-def sample_maximizers(X, count, n_init, D, model, num_steps=3000):
+def sample_maximizers(X, count, n_init, D, model, min_val, max_val, num_steps=3000):
     """
     Samples from the posterior over the global maximizer using the method by Shah & Ghahramani (2015). Approximates
     the RBF kernel with its Fourier dual. Samples random Fourier features, constructs a linear model and computes
@@ -82,8 +82,9 @@ def sample_maximizers(X, count, n_init, D, model, num_steps=3000):
     initializing points after optimization, so that each function sample will have one maximizer returned
     :param D: number of Fourier features to use
     :param model: gpflow model that uses the RBF kernel and has been optimized
+    :param min_val: float, min value that a maximizer can take
+    :param max_val: float, max value that a maximizer can take
     :param num_steps: int that specifies how many optimization steps to take
-    :param variational: bool. If usin
     :return: tensor of shape (count, d)
     """
     d = X.shape[1]
@@ -103,10 +104,10 @@ def sample_maximizers(X, count, n_init, D, model, num_steps=3000):
     # Compute x_star using gradient based methods
     optimizer = tf.keras.optimizers.Adam()
     x_star = tf.Variable(tf.random.uniform(shape=(count, n_init, d),
-                                           minval=0.,
-                                           maxval=1.,
+                                           minval=min_val,
+                                           maxval=max_val,
                                            dtype=tf.dtypes.float64),
-                         constraint=lambda x: tf.clip_by_value(x, 0., 1.))
+                         constraint=lambda x: tf.clip_by_value(x, min_val, max_val))
     loss = lambda: construct_maximizer_objective(x_star)
 
     prev_loss = loss().numpy()
