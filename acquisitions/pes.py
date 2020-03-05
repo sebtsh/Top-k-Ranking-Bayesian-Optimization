@@ -89,6 +89,7 @@ def I(chi, x_star, model, num_samples=1000):
     Predictive Entropy Search acquisition function.
     :param chi: input points in a query, tensor of shape (num_choices, d)
     :param x_star: possible maximizers, tensor of shape (num_max, d)
+    :param num_samples: int
     :param model: GPflow model
     """
 

@@ -136,4 +136,3 @@ def sample_maximizers(X, count, n_init, D, model, min_val, max_val, num_steps=30
                 indices=max_idxs)
 
     return maximizers
-    
