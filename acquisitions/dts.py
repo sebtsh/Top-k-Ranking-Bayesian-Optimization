@@ -9,6 +9,25 @@ import gpflow
 from .. import fourier_features
 
 
+def uniform_grid(input_dims, num_discrete_per_dim, low, high):
+    """
+    Returns an array with all possible permutations of discrete values in input_dims number of dimensions.
+    :param input_dims: int
+    :param num_discrete_per_dim: int
+    :param low: int
+    :param high: int
+    :return: tensor of shape (num_discrete_per_dim ** input_dims, input_dims)
+    """
+    num_points = num_discrete_per_dim ** input_dims
+    out = np.zeros([num_points, input_dims])
+    discrete_points = np.linspace(low, high, num_discrete_per_dim)
+    for i in range(num_points):
+        for dim in range(input_dims):
+            val = num_discrete_per_dim ** (dim)
+            out[i, dim] = discrete_points[int((i // val) % num_discrete_per_dim)]
+    return out
+
+
 def combinations(points):
     """
     Given d-dimensional points, return all pair combinations of those points
@@ -49,29 +68,30 @@ def variance_logistic_f(m, x):
     return variance_integral(means, variances) - expected_logistic_squared
 
 
-def sample_f(m, query_points, num_discrete_points):
+def sample_f(m, query_points, combs):
     """
     Generates a sample f using continuous Thompson sampling.
     :param m: gpflow model
     :param query_points: Input points corresponding to trained gpflow model. Tensor of shape (n, d)
-    :param num_discrete_points: int
+    :param combs: tensor of shape (num_discrete_points ** 2, input_dims * 2). all combinations of discrete points
     :return: tensor of shape (num_discrete_points ** 2, 1)
     """
-    side = np.linspace(0,1, num_discrete_points)
-    X = np.expand_dims(combinations(np.expand_dims(side, axis=1)), axis=0)
+
+    X = np.expand_dims(combs, axis=0)
+
     phi, W, b = fourier_features.sample_fourier_features(X, m.kernel)
     phi_y = fourier_features.fourier_features(tf.expand_dims(query_points, axis=0), W, b, m.kernel)
-    theta = fourier_features.sample_theta(phi_y, m, m.q_mu)
+    theta = fourier_features.sample_theta_variational(phi_y, m.q_mu, m.q_sqrt, None)
     return tf.squeeze(phi @ theta, axis=0)
 
 
-def soft_copeland_maximizer(f_vals):
+def soft_copeland_maximizer(f_vals, discrete_space):
     """
     Given function evaluations, calculate the Condorcet winner.
     :param f_vals: tensor of shape (num_discrete_points ** 2, 1)
+    :param discrete_space: tensor of shape (num_discrete_points, input_dims). all discrete points
     """
     num_discrete_points = int(np.sqrt(f_vals.shape[0]))
     soft_copeland = np.mean(np.reshape(logistic(f_vals),
                                        [num_discrete_points, num_discrete_points]), axis=1)  # (num_discrete_points)
-    points = np.linspace(0,1, num_discrete_points)
-    return points[np.argmax(soft_copeland)]
+    return discrete_space[np.argmax(soft_copeland)]
