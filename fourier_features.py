@@ -1,4 +1,5 @@
 import numpy as np
+import gpflow
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -28,9 +29,19 @@ def sample_fourier_features(X, kernel, D=100):
     count = X.shape[0]
     d = X.shape[2]
 
+    if type(kernel) == gpflow.kernels.base.Product:  # For DTS implementation where we use a product of kernels
+        lengthscales = np.zeros((d * 2))
+        for i in range(d):
+            k = kernel.kernels[i]
+            lengthscale_val = k.lengthscale.numpy()
+            lengthscales[i] = lengthscale_val
+            lengthscales[i + d] = lengthscale_val
+    else:
+        lengthscales = kernel.lengthscale.numpy()
+
     W = tf.random.normal(shape=(count, D, d),
                          mean=0.0,
-                         stddev=1.0 / kernel.lengthscale,
+                         stddev=1.0 / lengthscales,
                          dtype=tf.float64)
     b = tf.random.uniform(shape=(count, D, 1),
                           minval=0,
