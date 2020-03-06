@@ -30,12 +30,13 @@ def sample_fourier_features(X, kernel, D=100):
     d = X.shape[2]
 
     if type(kernel) == gpflow.kernels.base.Product:  # For DTS implementation where we use a product of kernels
-        lengthscales = np.zeros((d * 2))
-        for i in range(d):
+        input_dims = d // 2
+        lengthscales = np.zeros(d)
+        for i in range(input_dims):
             k = kernel.kernels[i]
             lengthscale_val = k.lengthscale.numpy()
             lengthscales[i] = lengthscale_val
-            lengthscales[i + d] = lengthscale_val
+            lengthscales[i + input_dims] = lengthscale_val
     else:
         lengthscales = kernel.lengthscale.numpy()
 
