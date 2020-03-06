@@ -15,8 +15,14 @@ def fourier_features(X, W, b, kernel):
     """
     D = W.shape[1]
 
+    if type(kernel) == gpflow.kernels.base.Product:  # For DTS implementation where we use a product of kernels
+        alpha = 1.
+        for kernel in kernel.kernels:
+            alpha *= kernel.variance
+    else:
+        alpha = kernel.variance
+
     WX_b = W @ tf.linalg.matrix_transpose(X) + b  # (count, D, n)
-    alpha = kernel.variance
     return tf.sqrt(2.0 * alpha / D) * tf.cos(tf.linalg.matrix_transpose(WX_b))  # (count, n, D)
 
 
