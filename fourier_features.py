@@ -91,14 +91,19 @@ def sample_theta_variational(phi, q_mu, q_sqrt):
 def sample_features_weights(X, model, D):
     # Ensure phi @ transposed_phi is invertible
     invertible = False
+    fail_count = 0
     while not invertible:
         try:
             phi, W, b = sample_fourier_features(X, model.kernel, D)  # phi has shape (count, n, D)
             theta = sample_theta_variational(phi, model.q_mu, model.q_sqrt)
             invertible = True
-        except tf.errors.InvalidArgumentError as err:
+        except tf.errors.InvalidArgumentError as err:  # this will be thrown if matrix inversion fails
             print(err)
             print("Resampling phi, W, b, theta")
+            fail_count += 1
+        if fail_count >= 100:
+            print("Retry limit exceeded")
+            raise ValueError("Failed")
 
     return phi, W, b, theta
 

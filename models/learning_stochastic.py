@@ -335,6 +335,7 @@ def train_model_fullcov(X,
 
     # Ensure Kmm is positive semidefinite
     psd = False
+    fail_count = 0
     while not psd:
         u = tf.Variable(np.random.uniform(low=obj_low, high=obj_high, size=(num_inducing, input_dims)),
                         name="u",
@@ -344,11 +345,16 @@ def train_model_fullcov(X,
             Kmm = kernel.K(u)
             L = tf.linalg.cholesky(Kmm)
             psd = True
-        except tf.errors.InvalidArgumentError as err:
+        except tf.errors.InvalidArgumentError as err:  # this will be thrown if Cholesky decomposition fails
             print(err)
             print("Kmm:")
             print(Kmm)
             print("Resampling inducing variables u")
+            fail_count += 1
+        if fail_count >= 100:
+            print("Retry limit exceeded")
+            raise ValueError("Failed")
+
 
     is_threshold_trainable = (indifference_threshold is None)
 
