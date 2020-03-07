@@ -83,15 +83,31 @@ def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
     transposed_phi = tf.linalg.matrix_transpose(phi)
     # (count, D, n)
 
-    transform_mat = tf.cond(n >= D, 
-        true_fn = lambda : tf.linalg.inv(transposed_phi @ phi) @ transposed_phi, 
-        false_fn = lambda: transposed_phi @ tf.linalg.inv(phi @ transposed_phi) )
-    # (count, D, n)
+    transform_mat = tf.cond(n >= D,
+        true_fn = lambda : tf.linalg.inv(transposed_phi @ phi) @ transposed_phi,
+        false_fn = lambda: transposed_phi @ tf.linalg.inv(phi @ transposed_phi) ) # (count, D, n)
+
+
 
     theta = transform_mat @ q_samples
     # (count, D, 1)
 
     return theta
+
+
+def sample_features_weights(X, model, D):
+    #  Ensure phi @ transposed_phi is invertible
+    invertible = False
+    while not invertible:
+        try:
+            phi, W, b = sample_fourier_features(X, model.kernel, D)  # phi has shape (count, n, D)
+            theta = sample_theta_variational(phi, model.q_mu, model.q_sqrt, model.likelihood.variance)
+            invertible = True
+        except tf.errors.InvalidArgumentError as err:
+            print(err)
+            print("Resampling phi, W, b, theta")
+
+    return phi, W, b, theta
 
 
 def sample_maximizers(X, count, n_init, D, model, min_val, max_val, num_steps=3000):
@@ -115,11 +131,7 @@ def sample_maximizers(X, count, n_init, D, model, min_val, max_val, num_steps=30
 
     X = tf.tile(tf.expand_dims(X, axis=0), [count, 1, 1])  # (count, n, d)
 
-    # Sample random features phi and get W and b
-    phi, W, b = sample_fourier_features(X, model.kernel, D)  # phi has shape (count, n, D)
-
-    # Sample posterior weights theta
-    theta = sample_theta_variational(phi, model.q_mu, model.q_sqrt, model.likelihood.variance)
+    phi, W, b, theta = sample_features_weights(X, model, D)
 
     def construct_maximizer_objective(x_star):
         g = tf.reduce_sum(fourier_features(x_star, W, b, model.kernel) @ theta)
