@@ -346,6 +346,8 @@ def train_model_fullcov(X,
             psd = True
         except tf.errors.InvalidArgumentError as err:
             print(err)
+            print("Kmm:")
+            print(Kmm)
             print("Resampling inducing variables u")
 
     is_threshold_trainable = (indifference_threshold is None)

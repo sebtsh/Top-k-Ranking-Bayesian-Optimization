@@ -4,9 +4,11 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 
-def fourier_features(X, W, b, kernel):
+def fourier_features(X, W, b):
     """
-    Given sampled tensors W and b, construct Fourier features of X
+    Given sampled tensors W and b, construct Fourier features of X. We do not take into account the normalizing constant
+    alpha in this method as it is only used for optimization, and the constant does not affect the location of the
+    maximizing point.
     :param X: tensor of shape (count, n, d)
     :param W: tensor of shape (count, D, d)
     :param b: tensor of shape (count, D, 1)
@@ -15,15 +17,8 @@ def fourier_features(X, W, b, kernel):
     """
     D = W.shape[1]
 
-    if type(kernel) == gpflow.kernels.base.Product:  # For DTS implementation where we use a product of kernels
-        alpha = 1.
-        for kernel in kernel.kernels:
-            alpha *= kernel.variance
-    else:
-        alpha = kernel.variance
-
     WX_b = W @ tf.linalg.matrix_transpose(X) + b  # (count, D, n)
-    return tf.sqrt(2.0 * alpha / D) * tf.cos(tf.linalg.matrix_transpose(WX_b))  # (count, n, D)
+    return tf.sqrt(2.0 / D) * tf.cos(tf.linalg.matrix_transpose(WX_b))  # (count, n, D)
 
 
 def sample_fourier_features(X, kernel, D=100):
@@ -55,10 +50,10 @@ def sample_fourier_features(X, kernel, D=100):
                           maxval=2 * np.pi,
                           dtype=tf.float64)
 
-    return fourier_features(X, W, b, kernel), W, b  # (count, n, D)
+    return fourier_features(X, W, b), W, b  # (count, n, D)
 
 
-def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
+def sample_theta_variational(phi, q_mu, q_sqrt):
     """
     Samples from distribution q(theta|D) = /int p(theta|y)p(y|f)q(f|D) df dy
     :param phi: Fourier features tensor with shape (count, n, D)
@@ -87,8 +82,6 @@ def sample_theta_variational(phi, q_mu, q_sqrt, likelihood_var):
         true_fn = lambda : tf.linalg.inv(transposed_phi @ phi) @ transposed_phi,
         false_fn = lambda: transposed_phi @ tf.linalg.inv(phi @ transposed_phi) ) # (count, D, n)
 
-
-
     theta = transform_mat @ q_samples
     # (count, D, 1)
 
@@ -101,7 +94,7 @@ def sample_features_weights(X, model, D):
     while not invertible:
         try:
             phi, W, b = sample_fourier_features(X, model.kernel, D)  # phi has shape (count, n, D)
-            theta = sample_theta_variational(phi, model.q_mu, model.q_sqrt, model.likelihood.variance)
+            theta = sample_theta_variational(phi, model.q_mu, model.q_sqrt)
             invertible = True
         except tf.errors.InvalidArgumentError as err:
             print(err)
@@ -134,7 +127,7 @@ def sample_maximizers(X, count, n_init, D, model, min_val, max_val, num_steps=30
     phi, W, b, theta = sample_features_weights(X, model, D)
 
     def construct_maximizer_objective(x_star):
-        g = tf.reduce_sum(fourier_features(x_star, W, b, model.kernel) @ theta)
+        g = tf.reduce_sum(fourier_features(x_star, W, b) @ theta)
         return -g
 
     # Compute x_star using gradient based methods
@@ -157,7 +150,7 @@ def sample_maximizers(X, count, n_init, D, model, min_val, max_val, num_steps=30
             break
         prev_loss = current_loss
 
-    fvals = tf.reduce_sum(fourier_features(x_star, W, b, model.kernel) @ theta, axis=-1)
+    fvals = tf.reduce_sum(fourier_features(x_star, W, b) @ theta, axis=-1)
     # (count, n_init)
     max_idxs = tf.transpose(tf.stack([tf.range(count, dtype=tf.int64), 
                          tf.math.argmax(fvals, axis=1)]))
