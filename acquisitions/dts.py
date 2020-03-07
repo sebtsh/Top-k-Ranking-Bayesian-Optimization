@@ -81,7 +81,7 @@ def sample_f(m, query_points, combs):
 
     phi, W, b = fourier_features.sample_fourier_features(X, m.kernel)
     phi_y = fourier_features.fourier_features(tf.expand_dims(query_points, axis=0), W, b)
-    theta = fourier_features.sample_theta_variational(phi_y, m.q_mu, m.q_sqrt, None)
+    theta = fourier_features.sample_theta_variational(phi_y, m.q_mu, m.q_sqrt)
     return tf.squeeze(phi @ theta, axis=0)
 
 

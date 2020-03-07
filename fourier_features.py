@@ -59,7 +59,6 @@ def sample_theta_variational(phi, q_mu, q_sqrt):
     :param phi: Fourier features tensor with shape (count, n, D)
     :param q_mu: tensor of shape (n, 1)
     :param q_sqrt: tensor of shape (1, n, n). Lower triangular matrix
-    :param likelihood_var: scalar. Variance of likelihood function p(y|f) from model
     :return: tensor with shape (count, D, 1)
     """
     count = phi.shape[0]
