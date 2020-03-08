@@ -22,7 +22,7 @@ def sample_maximizers_simple(model, count, num_discrete_points):
     return np.expand_dims(np.take(xx, samples_argmax), axis=1)
 
 
-def sample_maximizers_discrete(model, count, data):
+def sample_maximizers_discrete(model, count, data, batch_size=1000):
     """
     Samples maximizers from the GP by sampling values at each discrete point and finding the argmax
     :param model: gpflow model
@@ -30,8 +30,14 @@ def sample_maximizers_discrete(model, count, data):
     :param data: tensor of shape (num_data, input_dims). Discrete points to sample from
     :return: tensor of shape (count, input_dims)
     """
+    num_data = data.shape[0]
+    samples = np.zeros((count, num_data, 1))
 
-    samples = model.predict_f_samples(data, count)  # (count, num_data)
+    for i in range(num_data // batch_size):
+        first = i * batch_size
+        last = (i + 1) * batch_size
+        samples[:, first:last, :] = model.predict_f_samples(data[first:last], count)
+
     samples_argmax = np.squeeze(np.argmax(samples, axis=1), axis=1)
     return np.take(data, samples_argmax, axis=0)
 
@@ -161,11 +167,11 @@ def sample_inputs_discrete(current_inputs, data, num_samples, num_choices):
     Uniformly samples random inputs to query objective function. Sampled inputs must have
     existing data points among the choices, otherwise the learned function values for the
     input choices will be independent of the already learned function values for other data points.
-    Returns np array of shape (num_samples*num_inputs, num_choices, input_dims)
     :param current_inputs: np array of shape (num_inputs, input_dims)
     :param data: np array of shape (num_data, input_dims). Combinations will be drawn from here
     :param num_samples: int, number of random values to permutate with existing inputs
     :param num_choices: int, number of choices in an input query
+    :return: tensor of shape (num_samples * num_inputs, num_choices, input_dims)
     """
     num_inputs = current_inputs.shape[0]
     input_dims = current_inputs.shape[1]

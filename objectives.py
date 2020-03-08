@@ -47,6 +47,38 @@ def hartmann3d(x):
     return -np.sum(alpha * np.exp(-np.sum(A * ((x_repeat - P) ** 2), axis=-1)), axis=-1)
 
 
+def cifar(x, embedding_to_class):
+    """
+    2-D test function over 2-D embeddings of CIFAR-10 images. We define an arbitrary preference over classes as such:
+    Airplane (0) > Automobile (1) > Ship (8) > Truck (9) > Bird (2) > Cat (3) > Deer (4) > Dog (5) > Frog (6) > Horse
+    (7)
+
+    :param x: tensor of shape (..., 2). CIFAR-10 embeddings
+    :param embedding_to_class: dict
+    :return: tensor of shape (..., 1). last dim is int from 0-9 representing class
+    """
+    class_to_fval = {0: 0.1,
+                     1: 0.2,
+                     8: 0.3,
+                     9: 0.4,
+                     2: 0.5,
+                     3: 0.6,
+                     4: 0.7,
+                     5: 0.8,
+                     6: 0.9,
+                     7: 1.}  # smaller is more preferred
+
+    shape = x.shape[:-1]
+    raveled = np.reshape(x, [-1, 2])
+    raveled_shape = raveled.shape[:-1]
+    raveled_fvals = np.zeros((raveled_shape[0], 1), dtype=np.float64)
+
+    for i in range(raveled_shape[0]):
+        raveled_fvals[i] = class_to_fval[embedding_to_class[raveled[i].data.tobytes()]]
+
+    return np.reshape(raveled_fvals, shape + (1,))
+
+
 def objective_get_f_neg(x, objective):
     """
     Get objective function values of inputs. Note that this returns the negative of the above objective functions,
