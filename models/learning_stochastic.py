@@ -1,5 +1,5 @@
 # todo
-#     1. use samples to compute the objective function 
+#     1. use samples to compute the objective function
 #         elbo_fullcov(q_mu, q_sqrt_latent, inducing_variables, D_idxs, max_idxs, kernel, inputs)
 #        then it can works for different number of choices
 #     2. val_to_idxs, populate_dicts: need to adaptive to different number of choices
@@ -20,7 +20,7 @@ space.
 Formulation by Nguyen Quoc Phong.
 """
 
-import time 
+import time
 
 import numpy as np
 import tensorflow as tf
@@ -30,15 +30,15 @@ import gpflow
 from gpflow.utilities import set_trainable
 
 
-def elbo_fullcov(q_mu, 
-                q_sqrt_latent, 
-                inducing_inputs, 
-                D_idxs, 
-                max_idxs, 
-                kernel, 
-                inputs, 
-                indifference_threshold, 
-                n_inducing_sample=50, 
+def elbo_fullcov(q_mu,
+                q_sqrt_latent,
+                inducing_inputs,
+                D_idxs,
+                max_idxs,
+                kernel,
+                inputs,
+                indifference_threshold,
+                n_inducing_sample=50,
                 n_f_given_inducing_sample=30):
     """
     Calculates the ELBO for the PBO formulation, using a full covariance matrix.
@@ -56,7 +56,7 @@ def elbo_fullcov(q_mu,
     :return: tensor of shape ()
     """
     Kmm = kernel.K(inducing_inputs)
-    
+
     logdet_Kmm = tf.linalg.logdet(Kmm)
     invKmm = cholesky_matrix_inverse(Kmm)
 
@@ -64,7 +64,7 @@ def elbo_fullcov(q_mu,
 
     # 1. Sample from q(u)
     standard_mvn = tfp.distributions.MultivariateNormalDiag(
-            loc=tf.zeros(tf.shape(q_mu)[0], dtype=tf.float64), 
+            loc=tf.zeros(tf.shape(q_mu)[0], dtype=tf.float64),
             scale_diag=tf.ones(tf.shape(q_mu)[0], dtype=tf.float64))
 
     standard_mvn_samples = standard_mvn.sample(n_inducing_sample)
@@ -76,10 +76,10 @@ def elbo_fullcov(q_mu,
 
     posterior_inducing_samples = q_sqrt @ tf.expand_dims(standard_mvn_samples, axis=-1) + q_mu
     # (n_inducing_sample, num_inducing, 1)
-    
+
     # 2. p(f|u) where u are samples from q(u)
     f_mean_given_inducing_sample, f_cov_given_inducing_sample = p_f_given_u(
-            posterior_inducing_samples, 
+            posterior_inducing_samples,
             inducing_inputs, kernel, inputs, invKmm)
     # f_mean: (n_inducing_sample, num_inputs)
     # f_cov: (num_inputs, num_inputs)
@@ -89,13 +89,13 @@ def elbo_fullcov(q_mu,
     # (n_inducing_sample, num_inducing, 1)
 
     klterm = -0.5 * tf.reduce_mean(
-        tf.linalg.logdet(q_full) 
+        tf.linalg.logdet(q_full)
         + tf.transpose(zero_mean_inducing_samples, perm=[0,2,1]) @ inv_q_full @ zero_mean_inducing_samples
         - logdet_Kmm
         - tf.transpose(posterior_inducing_samples, perm= [0,2,1]) @ invKmm @ posterior_inducing_samples
     )
 
-    def body(i, likelihood): 
+    def body(i, likelihood):
         idxs = tf.squeeze(D_idxs.read(i))
         max_idx = max_idxs[i]
         num_choice = tf.shape(idxs)[0]
@@ -107,9 +107,9 @@ def elbo_fullcov(q_mu,
 
         fi_mean = tf.gather(f_mean_given_inducing_sample, indices=idxs, axis=1)
         # (n_inducing_sample, num_choice)
-        
+
         standard_mvn_i = tfp.distributions.MultivariateNormalDiag(
-                loc=tf.zeros_like(idxs, dtype=tf.float64), 
+                loc=tf.zeros_like(idxs, dtype=tf.float64),
                 scale_diag=tf.ones_like(idxs, dtype=tf.float64))
 
         standard_mvn_i_samples = standard_mvn_i.sample(n_f_given_inducing_sample)
@@ -121,7 +121,7 @@ def elbo_fullcov(q_mu,
 
         zero_mean_f_samples = tf.squeeze(transform_mat @ tf.expand_dims(standard_mvn_i_samples, axis=-1), axis=-1)
         # (n_f_given_inducing_sample, num_choice)
-        
+
         f_samples = tf.expand_dims(zero_mean_f_samples, axis=1) + fi_mean
         # (n_f_given_inducing_sample, n_inducing_sample, num_choice)
 
@@ -133,7 +133,7 @@ def elbo_fullcov(q_mu,
             f_samples = f_samples + tf.gather(diff_mat, indices=max_idx, axis=0)
 
             return tf.reduce_mean(
-                    tf.gather(f_samples, indices=max_idx, axis=-1) 
+                    tf.gather(f_samples, indices=max_idx, axis=-1)
                     - tf.reduce_logsumexp(f_samples, axis=-1))
 
         def false_fn(f_samples, mask_mat, diff_mat):
@@ -150,11 +150,11 @@ def elbo_fullcov(q_mu,
             indifference_prob = tf.clip_by_value(indifference_prob, clip_value_min=1e-50, clip_value_max=1.0 - 1e-50)
             indifference_logprob = tf.math.log(indifference_prob)
             # (n_f_given_inducing_sample, n_inducing_sample)
-            
+
             return tf.reduce_mean( indifference_logprob )
 
-        likelihood_i = tf.cond(max_idx >= 0, 
-            lambda: true_fn(max_idx, f_samples, diff_mat), 
+        likelihood_i = tf.cond(max_idx >= 0,
+            lambda: true_fn(max_idx, f_samples, diff_mat),
             lambda: false_fn(f_samples, mask_mat, diff_mat))
 
         likelihood = likelihood + likelihood_i
@@ -164,8 +164,8 @@ def elbo_fullcov(q_mu,
     cond = lambda i, _: i < num_data
 
     _, likelihood = tf.while_loop(
-            cond, 
-            body, 
+            cond,
+            body,
             (0, tf.constant(0.0, dtype=tf.float64)),
             parallel_iterations=10)
 
@@ -258,7 +258,7 @@ def populate_dicts(D_vals):
 def val_to_idx(D_vals, max_vals, val_to_idx_dict):
     """
     Converts training data from real values to index format using dictionaries.
-    Returns D_idxs (tensor with shape (k, num_choices, 1)) 
+    Returns D_idxs (tensor with shape (k, num_choices, 1))
         and max_idxs (tensor with shape (k, 1)):
             max_idxs[i,0] is argmax of D_idxs[i,:,0]
     :param D_vals: [k] list of ndarray [:,d]
@@ -279,19 +279,19 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
     max_idxs = tf.constant(max_idxs)
 
     D_idxs = tf.TensorArray(dtype=tf.int32, size=k, name='D_idxs', infer_shape=False, clear_after_read=False)
-    
+
     for i in range(k):
         np.stack([ [val_to_idx_dict[tuple(datum)]] for datum in D_vals[i] ])
 
     cond = lambda i, _: i < k
     body = lambda i, D_idxs: \
-        (i+1, 
+        (i+1,
          D_idxs.write(
-            i, 
+            i,
             tf.constant([ val_to_idx_dict[tuple(datum)] for datum in D_vals[i] ], dtype=tf.int32)
             )
         )
-    
+
     _, D_idxs = tf.while_loop(cond, body, (0, D_idxs))
 
     return D_idxs, max_idxs
@@ -332,36 +332,18 @@ def train_model_fullcov(X,
     q_mu = tf.Variable(np.zeros([num_inducing, 1]), name="q_mu", dtype=tf.float64)
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(num_inducing), axis=0), name="q_sqrt_latent", dtype=tf.float64)
     kernel = gpflow.kernels.RBF(lengthscale=[lengthscale for i in range(input_dims)])
-
-    # Ensure Kmm is positive semidefinite
-    psd = False
-    fail_count = 0
-    while not psd:
-        u = tf.Variable(np.random.uniform(low=obj_low, high=obj_high, size=(num_inducing, input_dims)),
-                        name="u",
-                        dtype=tf.float64,
-                        constraint=lambda x: tf.clip_by_value(x, obj_low, obj_high))
-        try:
-            Kmm = kernel.K(u)
-            L = tf.linalg.cholesky(Kmm)
-            psd = True
-        except tf.errors.InvalidArgumentError as err:  # this will be thrown if Cholesky decomposition fails
-            print(err)
-            print("Kmm:")
-            print(Kmm)
-            print("Resampling inducing variables u")
-            fail_count += 1
-        if fail_count >= 100:
-            print("Retry limit exceeded")
-            raise ValueError("Failed")
-
+    kernel.lengthscale.transform = gpflow.utilities.bijectors.positive(lower=gpflow.default_jitter())
+    u = tf.Variable(np.random.uniform(low=obj_low, high=obj_high, size=(num_inducing, input_dims)),
+                    name="u",
+                    dtype=tf.float64,
+                    constraint=lambda x: tf.clip_by_value(x, obj_low, obj_high))
 
     is_threshold_trainable = (indifference_threshold is None)
 
     if is_threshold_trainable:
-        indifference_threshold = tf.Variable(0.1, dtype=tf.float64, 
-                        constraint=lambda x: tf.clip_by_value(x, 
-                                                clip_value_min=0.0, 
+        indifference_threshold = tf.Variable(0.1, dtype=tf.float64,
+                        constraint=lambda x: tf.clip_by_value(x,
+                                                clip_value_min=0.0,
                                                 clip_value_max=np.infty))
 
     neg_elbo = lambda: -elbo_fullcov(q_mu=q_mu,
@@ -386,15 +368,24 @@ def train_model_fullcov(X,
 
     start_time = time.time()
 
-    for i in range(num_steps):
-        optimizer.minimize(neg_elbo, var_list=trainable_vars)
-        
-        if i % 500 == 0:
-            print('Negative ELBO at step {}: {} in {:.4f}s'.format(i, 
-                       neg_elbo().numpy(), 
-                       time.time() - start_time))
-            
-            start_time = time.time()
+    try:
+        for i in range(num_steps):
+            optimizer.minimize(neg_elbo, var_list=trainable_vars)
+
+            if i % 500 == 0:
+                print('Negative ELBO at step {}: {} in {:.4f}s'.format(i,
+                           neg_elbo().numpy(),
+                           time.time() - start_time))
+
+                start_time = time.time()
+    except tf.errors.InvalidArgumentError as err:
+        print(err)
+        print(q_mu)
+        print(q_sqrt_latent)
+        print(u)
+        print(inputs)
+        gpflow.utilities.print_summary(kernel)
+        raise ValueError
 
     if is_threshold_trainable:
         return q_mu, tf.linalg.band_part(q_sqrt_latent, -1, 0), u, inputs, kernel, indifference_threshold  # q_mu and q_sqrt
