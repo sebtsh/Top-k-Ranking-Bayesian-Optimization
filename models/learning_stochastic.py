@@ -171,6 +171,9 @@ def elbo_fullcov(q_mu,
 
     elbo = likelihood - klterm
 
+    if kernel.lengthscale.prior is not None:
+        elbo += kernel.lengthscale.log_prior()
+
     return elbo
 
 
@@ -186,7 +189,7 @@ def cholesky_matrix_inverse(A):
 
 def p_f_given_u(inducing_vars, inducing_inputs, kernel, inputs, invKmm_prior):
     """
-    Calculates the mean and covariance of the joint distriubtion p(f|u)
+    Calculates the mean and covariance of the joint distribution p(f|u)
     :param inducing_vars: tensor with shape (nsample,num_inducing,1)
     :param inducing_inputs: tensor with shape (num_inducing, input_dims)
     :param kernel: gpflow kernel to calculate covariance matrix for KL divergence
@@ -297,12 +300,41 @@ def val_to_idx(D_vals, max_vals, val_to_idx_dict):
     return D_idxs, max_idxs
 
 
+def init_inducing_vars(input_dims, num_inducing, obj_low, obj_high):
+    """
+    Initialize inducing variables. We create a uniform grid of points within the hypercube, then take num_inducing
+    number of random points from that grid.
+    :param input_dims: int
+    :param num_inducing: int
+    :param obj_low: float
+    :param obj_high: float
+    :return: tensor of shape (num_inducing, input_dims)
+    """
+    if input_dims == 1:
+        return np.expand_dims(np.linspace(obj_low, obj_high, num_inducing + 2)[1:num_inducing + 2 - 1], axis=1)
+    else:
+        # Figure out minimum number of discrete per dim required
+        num_discrete_per_dim = int(np.ceil(np.sqrt(num_inducing-1))) + 1
+        num_points = num_discrete_per_dim ** input_dims
+        grid = np.zeros([num_points, input_dims])
+        discrete_points = np.linspace(obj_low, obj_high, num_discrete_per_dim + 2)[1: num_discrete_per_dim + 2 - 1]
+        for i in range(num_points):
+            for dim in range(input_dims):
+                val = num_discrete_per_dim ** (dim)
+                grid[i, dim] = discrete_points[int((i // val) % num_discrete_per_dim)]
+
+        # Take num_inducing random points from grid
+        indices = np.random.choice(num_points, num_inducing, replace=False)
+        return np.take(grid, indices, axis=0)
+
+
 def train_model_fullcov(X,
                         y,
                         num_inducing,
                         obj_low,
                         obj_high,
                         lengthscale=1.,
+                        lengthscale_prior=None,
                         num_steps=5000,
                         indifference_threshold=None):
     """
@@ -317,6 +349,7 @@ def train_model_fullcov(X,
     :param obj_low: int. Floor of possible inducing point value in each dimension
     :param obj_high: int. Floor of possible inducing point value in each dimension
     :param lengthscale: float. Lengthscale to initialize RBF kernel with
+    :param lengthscale_prior: tensorflow_probability distribution
     :param num_steps: int that specifies how many optimization steps to take when training model
     :param indifference_threshold:
     """
@@ -333,7 +366,11 @@ def train_model_fullcov(X,
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(num_inducing), axis=0), name="q_sqrt_latent", dtype=tf.float64)
     kernel = gpflow.kernels.RBF(lengthscale=[lengthscale for i in range(input_dims)])
     kernel.lengthscale.transform = gpflow.utilities.bijectors.positive(lower=gpflow.default_jitter())
-    u = tf.Variable(np.random.uniform(low=obj_low, high=obj_high, size=(num_inducing, input_dims)),
+    if lengthscale_prior is not None:
+        kernel.lengthscale.prior = lengthscale_prior
+
+    inducing_vars = init_inducing_vars(input_dims, num_inducing, obj_low, obj_high)
+    u = tf.Variable(inducing_vars,
                     name="u",
                     dtype=tf.float64,
                     constraint=lambda x: tf.clip_by_value(x, obj_low, obj_high))
