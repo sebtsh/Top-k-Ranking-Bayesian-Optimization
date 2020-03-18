@@ -335,8 +335,10 @@ def train_model_fullcov(X,
                         obj_high,
                         lengthscale=1.,
                         lengthscale_prior=None,
+                        lengthscale_lower_bound=gpflow.default_jitter(),
                         num_steps=5000,
-                        indifference_threshold=None):
+                        indifference_threshold=None,
+                        inducing_vars=None):
     """
     if indifference_threshold is None:
         indifference_threshold is trained with maximum likelihood estimation
@@ -365,11 +367,15 @@ def train_model_fullcov(X,
     q_mu = tf.Variable(np.zeros([num_inducing, 1]), name="q_mu", dtype=tf.float64)
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(num_inducing), axis=0), name="q_sqrt_latent", dtype=tf.float64)
     kernel = gpflow.kernels.RBF(lengthscale=[lengthscale for i in range(input_dims)])
-    kernel.lengthscale.transform = gpflow.utilities.bijectors.positive(lower=gpflow.default_jitter())
+    if lengthscale_lower_bound is not None:
+        kernel.lengthscale.transform = gpflow.utilities.bijectors.positive(lower=lengthscale_lower_bound)
     if lengthscale_prior is not None:
         kernel.lengthscale.prior = lengthscale_prior
 
-    inducing_vars = init_inducing_vars(input_dims, num_inducing, obj_low, obj_high)
+    if inducing_vars is None:
+        inducing_vars = init_inducing_vars(input_dims, num_inducing, obj_low, obj_high)
+
+    assert num_inducing == inducing_vars.shape[0]
     u = tf.Variable(inducing_vars,
                     name="u",
                     dtype=tf.float64,
