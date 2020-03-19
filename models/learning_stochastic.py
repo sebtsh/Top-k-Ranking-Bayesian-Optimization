@@ -338,7 +338,8 @@ def train_model_fullcov(X,
                         lengthscale_lower_bound=gpflow.default_jitter(),
                         num_steps=5000,
                         indifference_threshold=None,
-                        inducing_vars=None):
+                        inducing_vars=None,
+                        inducing_trainable=True):
     """
     if indifference_threshold is None:
         indifference_threshold is trained with maximum likelihood estimation
@@ -376,10 +377,17 @@ def train_model_fullcov(X,
         inducing_vars = init_inducing_vars(input_dims, num_inducing, obj_low, obj_high)
 
     assert num_inducing == inducing_vars.shape[0]
-    u = tf.Variable(inducing_vars,
-                    name="u",
-                    dtype=tf.float64,
-                    constraint=lambda x: tf.clip_by_value(x, obj_low, obj_high))
+
+    if inducing_trainable:
+        u = tf.Variable(inducing_vars,
+                        name="u",
+                        dtype=tf.float64,
+                        constraint=lambda x: tf.clip_by_value(x, obj_low, obj_high))
+    else:
+        u = tf.constant(inducing_vars,
+                        name="u",
+                        dtype=tf.float64)
+
 
     is_threshold_trainable = (indifference_threshold is None)
 
@@ -404,10 +412,13 @@ def train_model_fullcov(X,
 
     if is_threshold_trainable:
         print("Indifference_threshold is trainable.")
-        trainable_vars = [q_mu, q_sqrt_latent, u, indifference_threshold] + list(kernel.trainable_variables)
+        trainable_vars = [q_mu, q_sqrt_latent, indifference_threshold] + list(kernel.trainable_variables)
     else:
         print("Indifference_threshold is fixed at {}".format(indifference_threshold))
-        trainable_vars = [q_mu, q_sqrt_latent, u] + list(kernel.trainable_variables)
+        trainable_vars = [q_mu, q_sqrt_latent] + list(kernel.trainable_variables)
+
+    if inducing_trainable:
+        trainable_vars.append(u)
 
     start_time = time.time()
 
@@ -415,11 +426,12 @@ def train_model_fullcov(X,
         for i in range(num_steps):
             optimizer.minimize(neg_elbo, var_list=trainable_vars)
 
-            if i % 500 == 0:
+            if i % 1 == 0:
                 print('Negative ELBO at step {}: {} in {:.4f}s'.format(i,
                            neg_elbo().numpy(),
                            time.time() - start_time))
-
+                print(u)
+                print(trainable_vars)
                 start_time = time.time()
     except tf.errors.InvalidArgumentError as err:
         print(err)
