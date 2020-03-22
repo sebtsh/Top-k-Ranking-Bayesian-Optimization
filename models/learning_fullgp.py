@@ -61,11 +61,24 @@ def convert_idx2coord(idx, n_total, n_per_dim, dim):
     return coord
 
 
+def convert_coord2idx(coord, n_total, n_per_dim, dim):
+    # coord: ndarray of shape (n,dim)
+    n = coord.shape[0]
+    idx = np.zeros(n)
+
+    for i in range(dim):
+        n_total /= n_per_dim 
+        idx += coord[:,i] * n_total 
+
+    return idx.astype(int)
+
+
 def get_random_inputs(low, high, 
         dim, 
         delta, 
         size, 
-        with_replacement=False):
+        with_replacement=False,
+        exclude_inputs=None):
     """
     low: smallest value in each dimension
     high: largest value in each dimension
@@ -73,7 +86,8 @@ def get_random_inputs(low, high,
     size: number of random inputs to be drawn
     with_replacement: = True if allowing repeated samples
                       = False otherwise
-    
+    exclude_inputs: (n,dim) # not include these inputs in the sampling
+
     for example 1d with low=0., high=1., delta = 0.5
         then there are 2 possible discretized points are:
             0.25 0.75
@@ -81,7 +95,24 @@ def get_random_inputs(low, high,
     n = int((high - low) / delta)
     num_cell = int(np.power(n, dim))
 
-    choice = np.random.choice(num_cell, replace=with_replacement, size=size)
+    if exclude_inputs is not None:
+        exclude_coords = (exclude_inputs / delta).astype(int)
+        exclude_idxs = convert_coord2idx(exclude_coords, num_cell, n, dim)
+    else:
+        exclude_idxs = []
+
+    if num_cell - len(exclude_idxs) < size:
+        print("input_dim = ", dim)
+        print("exclude_idxs = ", exclude_idxs)
+        print("n_per_dim = ", n)
+        print("n_total = ", num_cell)
+        raise Exception("Number of required samples ({}) > number of possible samples ({})!".format(size, num_cell - len(exclude_idxs)))
+
+    p = np.ones(num_cell)
+    p[exclude_idxs] = 0.
+    p /= np.sum(p)
+
+    choice = np.random.choice(num_cell, replace=with_replacement, size=size, p=p)
     # (size,)
 
     inputs = np.zeros([size, dim])
@@ -91,6 +122,49 @@ def get_random_inputs(low, high,
     inputs = inputs * delta + delta / 2.0
 
     return inputs
+
+
+
+def sample_inputs(current_inputs, 
+        num_samples, 
+        num_choices, 
+        min_val, max_val, 
+        delta=0.05):
+    """
+    Uniformly samples random inputs to query objective function. Sampled inputs must have
+    existing data points among the choices, otherwise the learned function values for the
+    input choices will be independent of the already learned function values for other data points.
+    Returns np array of shape (num_samples*num_inputs, num_choices, input_dims)
+    :param current_inputs: np array of shape (num_inputs, input_dims)
+    :param num_samples: int, number of random values to permutate with existing inputs
+    :param num_choices: int, number of choices in an input query
+    :param min_val: float, minimum value of sampled random values
+    :param max_val: float, max value of sampled random values
+    :param delta: the minimum distance between sampled inputs within a choice set
+    :return: tensor of shape (num_samples*num_inputs, num_choices, input_dims)
+    """
+    num_inputs = current_inputs.shape[0]
+    input_dims = current_inputs.shape[1]
+    samples = np.zeros([num_samples * num_inputs, num_choices, input_dims])
+
+    for i in range(num_inputs):
+        for j in range(num_samples):
+            cur_idx = i * num_samples + j
+
+            choice_samples = get_random_inputs(
+                                low=min_val,
+                                high=max_val,
+                                dim=input_dims,
+                                delta=delta,
+                                size = num_choices - 1,
+                                with_replacement = False,
+                                exclude_inputs = current_inputs[i].reshape(-1,input_dims)
+            )
+
+            samples[cur_idx, 0, :] = current_inputs[i]
+            samples[cur_idx, 1:, :] = choice_samples
+
+    return tf.constant(samples)
 
 
 def elbo_fullcov(q_mu,
@@ -413,7 +487,7 @@ def train_model_fullcov(X,
     
     kernel.lengthscale.assign(lengthscale_init)
     kernel.variance.assign(signal_variance_init)
-    
+
     try:
         for i in range(num_steps):
             optimizer.minimize(neg_elbo, var_list=trainable_vars)
