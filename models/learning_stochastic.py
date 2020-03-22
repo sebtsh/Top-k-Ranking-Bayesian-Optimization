@@ -426,7 +426,7 @@ def train_model_fullcov(X,
         for i in range(num_steps):
             optimizer.minimize(neg_elbo, var_list=trainable_vars)
 
-            if i % 1 == 0:
+            if i % 500 == 0:
                 print('Negative ELBO at step {}: {} in {:.4f}s'.format(i,
                            neg_elbo().numpy(),
                            time.time() - start_time))

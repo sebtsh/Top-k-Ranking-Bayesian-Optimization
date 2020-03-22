@@ -1,1 +1,1 @@
-from . import learning, learning_stochastic
+from . import learning, learning_stochastic, learning_sparsegp, learning_fullgp
