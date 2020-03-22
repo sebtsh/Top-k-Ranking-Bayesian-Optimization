@@ -85,7 +85,6 @@ def plot_gp(model, X, y, title):
 
 
 num_train = 2500
-indifference_threshold = 0.0
 """
 if abs(f(x) - f(x')) < indifference_threshold
     user is indifferent (no preference) about x and x'
@@ -107,25 +106,34 @@ means
     0.7 is more preferred than 0.95
 """
 
-# Sample data
-X = [
-    [[0.2], [0.4], [0.9]],
-    [[0.4], [0.7], [0.23], [0.9]],
-    [[0.2], [0.23]]
-    ]
-X = [[[0.2], [0.4]],
-    [[0.4], [0.7]],
-    [[0.76], [0.9]],
-    [[0.9], [0.2]],
-    [[0.7], [0.9]],
-    [[0.2], [0.7]],
-    [[0.7], [0.76]]]
+# # Sample data
+# X = [
+#     [[0.2], [0.4], [0.9]],
+#     [[0.4], [0.7], [0.23], [0.9]],
+#     [[0.2], [0.23]]
+#     ]
+# X = [[[0.2], [0.4]],
+#     [[0.4], [0.7]],
+#     [[0.76], [0.9]],
+#     [[0.9], [0.2]],
+#     [[0.7], [0.9]],
+#     [[0.2], [0.7]],
+#     [[0.7], [0.76]]]
 
 
 n = 10
 
-X = [PBO.models.learning_fullgp.get_random_inputs(low=0., high=1., dim=1, delta=0.05, size=2, with_replacement=False) for _ in range(n)]
+X = [PBO.models.learning_fullgp.get_random_inputs(
+            low=0., high=1., 
+            dim=1, 
+            delta=0.05, 
+            size=2, 
+            with_replacement=False) 
+    for _ in range(n)]
 y = forrester_get_y(X)
+
+X = np.array(X)
+y = np.array(y)
 
 
 # X = [[[0.2], [0.4]],
@@ -137,30 +145,6 @@ y = forrester_get_y(X)
 # y = [np.array([[0.4]]), None, np.array([[0.7]])]
 # # y = [np.array([[0.4]]), np.array([[0.4]]), np.array([[0.7]])]
 
-X = np.array(X)
-y = np.array(y)
-
-
-# idx_to_val_dict, val_to_idx_dict = PBO.models.learning_stochastic.populate_dicts(X)
-# D_idxs, max_idxs = PBO.models.learning_stochastic.val_to_idx(X, y, val_to_idx_dict)
-
-
-
-
-# print("X")
-# print(X)
-# print("y")
-# print(y)
-
-# print("idx_to_val_dict")
-# print(idx_to_val_dict)
-# print(val_to_idx_dict)
-
-# print("D_idxs")
-# print(D_idxs.read(0))
-# print(D_idxs.read(1))
-# print("max_idxs")
-# print(max_idxs)
 
 
 # result = PBO.models.learning_sparsegp.train_model_fullcov(
@@ -179,10 +163,10 @@ result = PBO.models.learning_fullgp.train_model_fullcov(
     X, y, 
     obj_low=0., 
     obj_high=1.,
-    deterministic=False,
+    deterministic=True,
     num_steps=num_train,
     n_sample=1000,
-    indifference_threshold=None,
+    indifference_threshold=0.0,
     lengthscale_lower_bound=gpflow.default_jitter())
 
 q_mu = result['q_mu']
