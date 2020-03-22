@@ -73,6 +73,25 @@ def convert_coord2idx(coord, n_total, n_per_dim, dim):
     return idx.astype(int)
 
 
+def get_all_discrete_inputs(low, high, 
+        dim, 
+        delta):
+    n = int((high - low) / delta)
+    num_cell = int(np.power(n, dim))
+
+    choice = list(range(num_cell))
+    # (size,)
+
+    inputs = np.zeros([num_cell, dim])
+    for i,c in enumerate(choice):
+        inputs[i,:] = convert_idx2coord(c, n_total=num_cell, n_per_dim=n, dim=dim)
+
+    inputs = inputs * delta + low + delta / 2.0
+
+    return inputs
+
+
+
 def get_random_inputs(low, high, 
         dim, 
         delta, 
@@ -119,7 +138,7 @@ def get_random_inputs(low, high,
     for i,c in enumerate(choice):
         inputs[i,:] = convert_idx2coord(c, n_total=num_cell, n_per_dim=n, dim=dim)
 
-    inputs = inputs * delta + delta / 2.0
+    inputs = inputs * delta +  low + delta / 2.0
 
     return inputs
 
