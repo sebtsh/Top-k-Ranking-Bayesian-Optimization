@@ -131,11 +131,13 @@ def sample_maximizers(X, count, n_init, D, model, min_val, max_val, num_steps=30
     phi, W, b, theta = sample_features_weights(X, model, D)
 
     def construct_maximizer_objective(x_star):
-        g = tf.reduce_sum(fourier_features(x_star, W, b) @ theta)
+        g = tf.reduce_mean(fourier_features(x_star, W, b) @ theta)
         return -g
 
     # Compute x_star using gradient based methods
-    optimizer = tf.keras.optimizers.Adam()
+    # optimizer = tf.keras.optimizers.Adam()
+    optimizer = tf.keras.optimizers.RMSprop(rho=0.0)
+
     x_star = tf.Variable(tf.random.uniform(shape=(count, n_init, d),
                                            minval=min_val,
                                            maxval=max_val,
@@ -154,12 +156,14 @@ def sample_maximizers(X, count, n_init, D, model, min_val, max_val, num_steps=30
             break
         prev_loss = current_loss
 
-    fvals = tf.reduce_sum(fourier_features(x_star, W, b) @ theta, axis=-1)
+    test = fourier_features(x_star, W, b) @ theta
+    print("test.shape = ", test.numpy().shape)
+
+    fvals = tf.squeeze(fourier_features(x_star, W, b) @ theta, axis=2)
     # (count, n_init)
     max_idxs = tf.transpose(tf.stack([tf.range(count, dtype=tf.int64), 
                          tf.math.argmax(fvals, axis=1)]))
 
-    maximizers = tf.gather_nd(x_star, 
-                indices=max_idxs)
+    maximizers = tf.gather_nd(x_star, indices=max_idxs)
 
     return maximizers
