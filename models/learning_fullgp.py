@@ -318,6 +318,8 @@ def train_model_fullcov(X,
     y,
     obj_low,
     obj_high,
+    lengthscale_init=None,
+    signal_variance_init=None,
     indifference_threshold=0.0,
     n_sample = 1000,
     deterministic=False,
@@ -402,7 +404,15 @@ def train_model_fullcov(X,
 
 
     start_time = time.time()
-    kernel.lengthscale.assign([lengthscale_mean_regularizer for i in range(input_dims)])
+
+    if lengthscale_init is None:
+        lengthscale_init = [lengthscale_mean_regularizer for i in range(input_dims)]
+    
+    if signal_variance_init is None:
+        signal_variance_init = 1.0
+    
+    kernel.lengthscale.assign(lengthscale_init)
+    kernel.variance.assign(signal_variance_init)
     
     try:
         for i in range(num_steps):

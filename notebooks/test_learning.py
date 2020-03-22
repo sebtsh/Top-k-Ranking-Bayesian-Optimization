@@ -132,20 +132,17 @@ X = [PBO.models.learning_fullgp.get_random_inputs(
     for _ in range(n)]
 y = forrester_get_y(X)
 
-X = np.array(X)
-y = np.array(y)
-
-
 # X = [[[0.2], [0.4]],
 #     [[0.4], [0.7]],
 #     [[0.7], [0.95]]]
 
 # X = [np.array(x) for x in X]
 
-# y = [np.array([[0.4]]), None, np.array([[0.7]])]
-# # y = [np.array([[0.4]]), np.array([[0.4]]), np.array([[0.7]])]
+# # y = [np.array([[0.4]]), None, np.array([[0.7]])]
+# y = [np.array([[0.4]]), np.array([[0.4]]), np.array([[0.7]])]
 
-
+X = np.array(X)
+y = np.array(y)
 
 # result = PBO.models.learning_sparsegp.train_model_fullcov(
 #                                     X, y, 
