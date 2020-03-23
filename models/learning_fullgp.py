@@ -482,7 +482,7 @@ def train_model_fullcov(X,
                                      indifference_threshold=indifference_threshold,
                                      standard_mvn_samples = standard_mvn_samples,
                                      n_sample=n_sample) \
-                        + lengthscale_mean_regularizer
+                        + lengthscale_regularizer
 
     # optimizer = tf.keras.optimizers.Adam(learning_rate=0.1)
     optimizer = tf.keras.optimizers.RMSprop(rho=0.0 if deterministic else 0.9)
