@@ -418,8 +418,8 @@ def train_model_fullcov(X,
     deterministic=False,
     num_steps=5000,
     lengthscale_lower_bound=gpflow.default_jitter(),
-    regularizer_lengthscale_mean_over_range=0.2,
-    regularizer_lengthscale_std_over_range=0.5                        
+    regularizer_lengthscale_mean_over_range=0.5,
+    regularizer_lengthscale_std_over_range=0.35                        
         ):
     """
     if indifference_threshold is None:
@@ -499,7 +499,7 @@ def train_model_fullcov(X,
     start_time = time.time()
 
     if lengthscale_init is None:
-        lengthscale_init = [lengthscale_mean_regularizer for i in range(input_dims)]
+        lengthscale_init = np.array([lengthscale_mean_regularizer for i in range(input_dims)])
     
     if signal_variance_init is None:
         signal_variance_init = 1.0
@@ -507,11 +507,33 @@ def train_model_fullcov(X,
     kernel.lengthscale.assign(lengthscale_init)
     kernel.variance.assign(signal_variance_init)
 
+    # reduce initial lengthscale if it is too big
+    while True:
+
+        is_lengthscale_too_big = False
+
+        try:
+            cur_neg_elbo = neg_elbo().numpy()
+            is_lengthscale_too_big = (cur_neg_elbo > 1e10)
+        except tf.errors.InvalidArgumentError as err:
+            # lengthscale is too big that it causes numerical error
+            is_lengthscale_too_big = True
+        
+        if not is_lengthscale_too_big:
+            break
+
+        lengthscale_init = np.array(lengthscale_init) * 0.8
+        kernel.lengthscale.assign(lengthscale_init)
+
+    print("Initialize lengthscale at {}".format(lengthscale_init))
+    print("       signal variance at {}".format(signal_variance_init))
+    print("   Initial negative ELBO: {}".format(cur_neg_elbo))
+
     try:
         for i in range(num_steps):
             optimizer.minimize(neg_elbo, var_list=trainable_vars)
 
-            if i % 100 == 0:
+            if i % 500 == 0:
                 print('Negative ELBO at step {}: {} in {:.4f}s'.format(i,
                         neg_elbo().numpy(),
                         time.time() - start_time))
