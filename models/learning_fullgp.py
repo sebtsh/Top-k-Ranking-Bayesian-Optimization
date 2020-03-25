@@ -120,19 +120,37 @@ def get_random_inputs(low, high,
     else:
         exclude_idxs = []
 
-    if num_cell - len(exclude_idxs) < size:
+    n_possible_choice = num_cell - len(exclude_idxs) 
+    if n_possible_choice < size and not with_replacement:
         print("input_dim = ", dim)
         print("exclude_idxs = ", exclude_idxs)
         print("n_per_dim = ", n)
         print("n_total = ", num_cell)
-        raise Exception("Number of required samples ({}) > number of possible samples ({})!".format(size, num_cell - len(exclude_idxs)))
+        
+        print("Warning: Number of required samples ({}) > number of possible samples ({})".format(size, n_possible_choice))
+        print("         So there are repeated samples!")
 
     p = np.ones(num_cell)
     p[exclude_idxs] = 0.
     p /= np.sum(p)
 
-    choice = np.random.choice(num_cell, replace=with_replacement, size=size, p=p)
-    # (size,)
+    cur_size = size
+    choice = []
+    while True:
+        # repeatedly sampling if n_possible_choice < size
+        choice_i = np.random.choice(num_cell, 
+                    replace=with_replacement, 
+                    size=cur_size if cur_size <= n_possible_choice else n_possible_choice, 
+                    p=p)
+        # (size,)
+
+        choice.append(choice_i)
+
+        cur_size -= n_possible_choice
+        if cur_size <= 0:
+            break
+    
+    choice = np.concatenate(choice)
 
     inputs = np.zeros([size, dim])
     for i,c in enumerate(choice):
