@@ -68,7 +68,7 @@ def variance_logistic_f(m, x):
     return variance_integral(means, variances) - expected_logistic_squared
 
 
-def sample_f(m, query_points, combs):
+def sample_f(m, query_points, combs, D=1000):
     """
     Generates a sample f using continuous Thompson sampling.
     :param m: gpflow model
@@ -79,7 +79,7 @@ def sample_f(m, query_points, combs):
 
     X = np.expand_dims(combs, axis=0)
 
-    phi, W, b = fourier_features.sample_fourier_features(X, m.kernel)
+    phi, W, b = fourier_features.sample_fourier_features(X, m.kernel, D)
     phi_y = fourier_features.fourier_features(tf.expand_dims(query_points, axis=0), W, b)
     theta = fourier_features.sample_theta_variational(phi_y, m.q_mu, m.q_sqrt)
     return tf.squeeze(phi @ theta, axis=0)
