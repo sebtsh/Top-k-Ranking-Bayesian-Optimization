@@ -161,6 +161,27 @@ def get_random_inputs(low, high,
     return inputs
 
 
+def construct_input_pairs(current_inputs, points):
+    """
+    Pairs all current inputs with everything in points array. Pairwise function
+    :param current_inputs: np array of shape (num_inputs, input_dims)
+    :param points: np array of shape (num_points, input_dims)
+    :return tensor of shape (num_inputs * num_points, num_choices, input_dims)
+    """
+    num_choices = 2
+    num_inputs = current_inputs.shape[0]
+    input_dims = current_inputs.shape[1]
+    num_points = points.shape[0]
+    samples = np.zeros([num_inputs * num_points, num_choices, input_dims])
+
+    for i in range(num_inputs):
+        for j in range(num_points):
+            cur_idx = i * num_points + j
+            samples[cur_idx, 0, :] = current_inputs[i]
+            samples[cur_idx, 1, :] = points[j]
+
+    return tf.constant(samples)
+
 
 def sample_inputs(current_inputs, 
         num_samples, 
@@ -168,10 +189,8 @@ def sample_inputs(current_inputs,
         min_val, max_val, 
         delta=0.05):
     """
-    Uniformly samples random inputs to query objective function. Sampled inputs must have
-    existing data points among the choices, otherwise the learned function values for the
-    input choices will be independent of the already learned function values for other data points.
-    Returns np array of shape (num_samples*num_inputs, num_choices, input_dims)
+    Uniformly samples random inputs to query objective function. Sampled inputs should have
+    existing data points among the choices
     :param current_inputs: np array of shape (num_inputs, input_dims)
     :param num_samples: int, number of random values to permutate with existing inputs
     :param num_choices: int, number of choices in an input query

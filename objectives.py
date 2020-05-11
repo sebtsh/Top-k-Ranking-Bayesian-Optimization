@@ -79,6 +79,26 @@ def cifar(x, embedding_to_class):
     return np.reshape(raveled_fvals, shape + (1,))
 
 
+def sushi(x, feat_to_fval_dict):
+    """
+    6-D test function over the Sushi dataset with the minor group feature removed (overlaps with major group).
+    :param x: tensor of shape (..., 6). Sushi datum
+    :param feat_to_fval_dict: dictionary from sushi features to fval
+    :return: tensor of shape (..., ). Returns the fvals of each sushi datum in the array
+    """
+
+    input_dims = x.shape[-1]
+    shape = x.shape[:-1]  # shape except last dim
+    raveled = np.reshape(x, [-1, input_dims])
+    raveled_shape = raveled.shape[:-1]
+    raveled_fvals = np.zeros((raveled_shape[0]), dtype=np.float64)
+
+    for i in range(raveled_shape[0]):
+        raveled_fvals[i] = -feat_to_fval_dict[raveled[i].data.tobytes()]  # here smaller is more preferred
+
+    return np.reshape(raveled_fvals, shape)
+
+
 def objective_get_f_neg(x, objective):
     """
     Get objective function values of inputs. Note that this returns the negative of the above objective functions,
