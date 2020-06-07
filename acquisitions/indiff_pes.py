@@ -1,6 +1,5 @@
 """
 Contains functions for the Predictive Entropy Search acquisition function.
-Formulation by Nguyen Quoc Phong.
     allow indifference only for top-1
     Example: (x0, x1, x2) there are 4 possible observations:
         1. x0 is the most preferred
@@ -11,7 +10,6 @@ Formulation by Nguyen Quoc Phong.
 
 import numpy as np
 import scipy.special as spmc
-import itertools
 
 
 def I_batch(chi, x_star, model, num_samples=1000, indifference_threshold = 0.1):

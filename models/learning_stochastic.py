@@ -1,31 +1,7 @@
-# todo
-#     1. use samples to compute the objective function
-#         elbo_fullcov(q_mu, q_sqrt_latent, inducing_variables, D_idxs, max_idxs, kernel, inputs)
-#        then it can works for different number of choices
-#     2. val_to_idxs, populate_dicts: need to adaptive to different number of choices
-#         by converting some to list
-#     2. check function q_f to see if the implementation is correct
-#         checked: correct
-"""
-    forester_get_Y:
-        as X is a list, change the function!
-    sample maximizers:
-        change observations from inducing input, inducing variables
-        to distribution of inducing variables
-
-Given ordinal (preference) data consisting of sets of input points and a most preferred input point for every such set,
-the train_model function learns variational parameters that approximate the distribution of a latent function f over
-all input points present in the data, which can be used to construct GP models to approximate f over the entire input
-space.
-Formulation by Nguyen Quoc Phong.
-"""
-
 import time
-
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-
 import gpflow
 from gpflow.utilities import set_trainable
 

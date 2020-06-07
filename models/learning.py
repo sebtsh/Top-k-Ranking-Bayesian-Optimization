@@ -1,11 +1,3 @@
-"""
-Given ordinal (preference) data consisting of sets of input points and a most preferred input point for every such set,
-the train_model function learns variational parameters that approximate the distribution of a latent function f over
-all input points present in the data, which can be used to construct GP models to approximate f over the entire input
-space.
-Formulation by Nguyen Quoc Phong.
-"""
-
 import numpy as np
 import tensorflow as tf
 import gpflow
@@ -358,4 +350,3 @@ def init_SVGP_fullcov(q_mu, q_sqrt, inducing_variables, kernel, likelihood):
     set_trainable(model.inducing_variable.Z, False)
 
     return model
-

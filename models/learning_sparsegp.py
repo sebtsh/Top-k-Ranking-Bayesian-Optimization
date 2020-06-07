@@ -1,31 +1,7 @@
-# todo
-#     1. use samples to compute the objective function
-#         elbo_fullcov(q_mu, q_sqrt_latent, inducing_variables, D_idxs, max_idxs, kernel, inputs)
-#        then it can works for different number of choices
-#     2. val_to_idxs, populate_dicts: need to adaptive to different number of choices
-#         by converting some to list
-#     2. check function q_f to see if the implementation is correct
-#         checked: correct
-"""
-    forester_get_Y:
-        as X is a list, change the function!
-    sample maximizers:
-        change observations from inducing input, inducing variables
-        to distribution of inducing variables
-
-Given ordinal (preference) data consisting of sets of input points and a most preferred input point for every such set,
-the train_model function learns variational parameters that approximate the distribution of a latent function f over
-all input points present in the data, which can be used to construct GP models to approximate f over the entire input
-space.
-Formulation by Nguyen Quoc Phong.
-"""
-
 import time
-
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-
 import gpflow
 from gpflow.utilities import set_trainable
 
@@ -216,13 +192,6 @@ def q_f(q_mu, q_full, inducing_variables, kernel, inputs, Kmm, Kmm_inv):
     :param inputs: tensor of shape (num_inputs, input_dims) with indices corresponding to that of D_idxs and max_idxs
     :return: (tensor of shape (num_inputs), tensor of shape (num_inputs, num_inputs))
     """
-
-    # q_sqrt = tf.linalg.band_part(q_sqrt_latent, -1, 0)  # Force into lower triangular
-    # q_full = q_sqrt @ tf.linalg.matrix_transpose(q_sqrt)  # (1, num_data, num_data)
-
-    # Kmm = kernel.K(inducing_variables)  # (m, m)
-    # Kmm_inv = cholesky_matrix_inverse(Kmm)
-
     Knm = kernel.K(inputs, inducing_variables)  # (n, m)
     A = Knm @ Kmm_inv  # (n, m)
 
@@ -361,7 +330,6 @@ def train_model_fullcov(X,
     inputs = np.array([idx_to_val_dict[i] for i in range(n)])
     num_input = inputs.shape[0]
 
-
     # Initialize variational parameters
     q_mu = tf.Variable(np.zeros([num_inducing, 1]), name="q_mu", dtype=tf.float64)
     q_sqrt_latent = tf.Variable(np.expand_dims(np.eye(num_inducing), axis=0), name="q_sqrt_latent", dtype=tf.float64)
@@ -370,13 +338,13 @@ def train_model_fullcov(X,
     if lengthscale_lower_bound is not None:
         kernel.lengthscale.transform = gpflow.utilities.bijectors.positive(lower=lengthscale_lower_bound)
 
-    if inducing_vars is None:
-        inducing_vars = init_inducing_vars(input_dims, num_inducing, obj_low, obj_high)
-    
-    if isinstance(inducing_vars, np.ndarray):
-        init_inducing_vars = inducing_vars
-    else:
-        init_inducing_vars = inducing_vars.numpy()
+    # if inducing_vars is None:
+    #     inducing_vars = init_inducing_vars(input_dims, num_inducing, obj_low, obj_high)
+    #
+    # if isinstance(inducing_vars, np.ndarray):
+    #     init_inducing_vars = inducing_vars
+    # else:
+    #     init_inducing_vars = inducing_vars.numpy()
 
     u = tf.Variable(inducing_vars,
                     name="u",

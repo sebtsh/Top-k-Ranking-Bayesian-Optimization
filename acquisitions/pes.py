@@ -1,6 +1,5 @@
 """
 Contains functions for the Predictive Entropy Search acquisition function.
-Formulation by Nguyen Quoc Phong.
 """
 
 import numpy as np

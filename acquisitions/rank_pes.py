@@ -1,12 +1,10 @@
 """
 Contains functions for the Predictive Entropy Search acquisition function.
-Formulation by Nguyen Quoc Phong.
     for top-k ranking
 """
 
 import numpy as np
 import scipy.special as spmc
-import itertools
 
 
 def I_batch(chi, x_star, model, topk=None, num_samples=10000, indifference_threshold = 0.0):
