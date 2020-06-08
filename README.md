@@ -1,6 +1,6 @@
 # Top-k Ranking Bayesian Optimization
 
-The experiments are contained in the notebooks folder as Jupyter notebooks. 
+The experiments are contained in the notebooks folder as Jupyter notebooks. As of 11 June, only the top-1 of 2 (pairwise comparisons) rankings are included. 
 
 ## Setup
 The experiments were ran on Ubuntu 18.04 with NVIDIA GPUs with Linux x86_64 driver version >= 418.39 (compatible with CUDA 10.1).
