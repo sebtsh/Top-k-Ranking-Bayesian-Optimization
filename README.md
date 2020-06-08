@@ -1,16 +1,33 @@
-# Preferential Bayesian Optimization
+# Top-k Ranking Bayesian Optimization
+
+The experiments are contained in the notebooks folder as Jupyter notebooks. As of 11 June, only the top-1 of 2 (pairwise comparisons) rankings are included. 
 
 ## Setup
-This package and the notebooks require TensorFlow 2 and GPflow 2. The easiest way to
-set up the environment is through the Docker image at sebtsh/gpflow2:
+The experiments were ran on Ubuntu 18.04 with NVIDIA GPUs with Linux x86_64 driver version >= 418.39 (compatible with CUDA 10.1).
+To reproduce the conditions under which the results were obtained:
+
+1. Create a new Anaconda environment with Python 3.6 and activate it
+```
+conda create --name topkrankingbo python=3.6
+conda activate topkrankingbo
+```
+
+2. Install TensorFlow 2.1 and TensorFlow Probability through pip
+```
+pip install tensorflow==2.1 tensorflow-probability==0.9
+```
+
+3. Install CUDA 10.1, cuDNN 7.6.5, matplotlib and jupyter through conda
+```
+conda install -c anaconda cudatoolkit=10.1 cudnn matplotlib jupyter
+```
+
+4. Install GPflow 2.0.0-rc1
 
 ```
-docker run --gpus all -p 8888:8888 -v <dir where this repo is cloned>/PBO:/tf/PBO sebtsh/gpflow2
+git clone https://github.com/GPflow/GPflow.git
+cd GPflow
+git tag -l
+git checkout tags/2.0.0-rc1
+pip install -e .
 ```
-
-This will start a Jupyter notebook server from the Docker image with all the required
-dependencies. To take advantage of Nvidia GPUs, use Linux and ensure the Nvidia 
-Container Toolkit is installed (follow the instructions at 
-https://www.tensorflow.org/install/docker, at GPU Support section).
-
-The experiments can be found in the notebooks folder of this repo.
