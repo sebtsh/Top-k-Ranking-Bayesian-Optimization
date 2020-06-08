@@ -3,7 +3,7 @@
 The experiments are contained in the notebooks folder as Jupyter notebooks. 
 
 ## Setup
-The experiments were ran on Ubuntu 18.04 with NVIDIA GPUs with Linux x86_64 driver version >= 418.39.
+The experiments were ran on Ubuntu 18.04 with NVIDIA GPUs with Linux x86_64 driver version >= 418.39 (compatible with CUDA 10.1).
 To reproduce the conditions under which the results were obtained:
 
 1. Create a new Anaconda environment with Python 3.6 and activate it
