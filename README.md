@@ -28,7 +28,7 @@ conda activate topkrankingbo
 pip install tensorflow==2.1 tensorflow-probability==0.9
 ```
 
-3. Install CUDA 10.1, cuDNN 7.6.5, matplotlib and Jupyter through conda
+3. Install CUDA 10.1, cuDNN 7.6.5, Matplotlib and Jupyter through conda
 ```
 conda install -c anaconda cudatoolkit=10.1 cudnn matplotlib jupyter
 ```
