@@ -47,32 +47,25 @@ if gpus:
 # In[ ]:
 
 
-lengthscale = 0.05
-lengthscale_prior_alpha = tf.constant(2, dtype=tf.float64)
-lengthscale_prior_beta = tf.constant(4, dtype=tf.float64)
-
-
-# In[ ]:
-
-
-objective = PBO.objectives.forrester
-objective_low = 0.
-objective_high = 1.
-objective_name = "Forrester"
+objective = PBO.objectives.six_hump_camel
+objective_low = -1.5
+objective_high = 1.5
+objective_name = "SHC"
 acquisition_name = "EI"
-experiment_name = "PBO" + "_" + acquisition_name + "_" + objective_name + "FullGP"
+experiment_name = acquisition_name + "_" + objective_name
 
 
 # In[ ]:
 
 
 num_runs = 10
-num_evals = 20
+num_evals = 35
+num_samples = 1000
 num_choices = 2
-input_dims = 1
+input_dims = 2
 objective_dim = input_dims # CHANGE 1: require the objective dim
 num_maximizers = 20
-num_init_prefs = 5 # CHANGE 2: randomly initialize with some preferences
+num_init_prefs = 6 # CHANGE 2: randomly initialize with some preferences
 
 # CHANGE 1: reduce the value of delta to avoid numerical error
 # as k(x,x') = sigma^2 * exp( -[(x-x')/l]^2 )
@@ -81,9 +74,16 @@ num_init_prefs = 5 # CHANGE 2: randomly initialize with some preferences
 #   It is ok for the total number of observations > the total number of possible inputs
 # because there is a noise in the observation, it might require repeated observations 
 # at the same input pair to improve the confidence 
-num_discrete_per_dim = 60
+num_discrete_per_dim = 40
 delta = (objective_high - objective_low) / num_discrete_per_dim
-num_samples = num_discrete_per_dim-1  # for 1-D case
+
+
+# In[ ]:
+
+
+lengthscale = 0.4
+lengthscale_prior_alpha = tf.constant(3, dtype=tf.float64)
+lengthscale_prior_beta = tf.constant(3, dtype=tf.float64)
 
 
 # In[ ]:
@@ -99,46 +99,69 @@ except FileExistsError:
     print("Directory " , results_dir ,  " already exists")
 
 
-# Plot of the Forrester function (global min at ~0.757):
+# Plot of the SHC function (global min at at x = [0.0898, -0.7126] and x = [-0.0898, 0.7126]):
 
 # In[ ]:
 
 
-xx = np.linspace(0.0, 1.0, 100).reshape(100, 1)
-plt.figure(figsize=(12, 6))
-plt.plot(xx, objective(xx), 'C0', linewidth=1)
-plt.xlim(-0.0, 1.0)
+side = np.linspace(objective_low, objective_high, num_discrete_per_dim)
+X,Y = np.meshgrid(side,side)
+combs = PBO.acquisitions.dts.combinations(np.expand_dims(side, axis=1))
+fvals = objective(combs)
+preds = tf.transpose(tf.reshape(fvals, [num_discrete_per_dim, num_discrete_per_dim]))
+plt.figure(figsize=(4, 4), dpi=200)
+plt.imshow(preds, 
+           interpolation='nearest', 
+           extent=(objective_low, objective_high, objective_low, objective_high), 
+           origin='lower', 
+           cmap='Spectral')
+plt.colorbar()
 
 
 # In[ ]:
 
 
-def plot_gp(model, X, y, title, cmap="Spectral"):
-    #Plotting code from GPflow authors
+def plot_gp(model, inducing_points, inputs, title, cmap="Spectral"):
 
-    ## generate test points for prediction
-    xx = np.linspace(-0.1, 1.1, 100).reshape(100, 1)  # test points must be of shape (N, D)
+    side = np.linspace(objective_low, objective_high, num_discrete_per_dim)
+    combs = PBO.acquisitions.dts.combinations(np.expand_dims(side, axis=1))
+    predictions = model.predict_y(combs)
+    preds = tf.transpose(tf.reshape(predictions[0], [num_discrete_per_dim, num_discrete_per_dim]))
+    variances = tf.transpose(tf.reshape(predictions[1], [num_discrete_per_dim, num_discrete_per_dim]))
 
-    ## predict mean and variance of latent GP at test points
-    mean, var = model.predict_f(xx)
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    fig.suptitle(title)
+    fig.set_size_inches(18.5, 6.88)
+    fig.set_dpi((200))
 
-    ## generate 10 samples from posterior
-    samples = model.predict_f_samples(xx, 10)  # shape (10, 100, 1)
+    ax1.axis('equal')
+    im1 = ax1.imshow(preds, 
+                     interpolation='nearest', 
+                     extent=(objective_low, objective_high, objective_low, objective_high), 
+                     origin='lower', 
+                     cmap=cmap)
+    ax1.plot(inducing_points[:, 0], inducing_points[:, 1], 'kx', mew=2)
+    ax1.plot(inputs[:, 0], inputs[:, 1], 'ko', mew=2, color='w')
+    ax1.set_title("Mean")
+    ax1.set_xlabel("x0")
+    ax1.set_ylabel("x1")
+    fig.colorbar(im1, ax=ax1)
 
-    ## plot 
-    plt.figure(figsize=(12, 6))
-    plt.plot(X, y, 'kx', mew=2)
-    plt.plot(xx, mean, 'C0', lw=2)
-    plt.fill_between(xx[:,0],
-                     mean[:,0] - 1.96 * np.sqrt(var[:,0]),
-                     mean[:,0] + 1.96 * np.sqrt(var[:,0]),
-                     color='C0', alpha=0.2)
-
-    plt.plot(xx, samples[:, :, 0].numpy().T, 'C0', linewidth=.5)
-    plt.xlim(-0.1, 1.1)
-    plt.title(title)
+    ax2.axis('equal')
+    im2 = ax2.imshow(variances, 
+                     interpolation='nearest', 
+                     extent=(objective_low, objective_high, objective_low, objective_high), 
+                     origin='lower', 
+                     cmap=cmap)
+    ax2.plot(inducing_points[:, 0], inducing_points[:, 1], 'kx', mew=2)
+    ax2.plot(inputs[:, 0], inputs[:, 1], 'ko', mew=2, color='w')
+    ax2.set_title("Variance")
+    ax2.set_xlabel("x0")
+    ax2.set_ylabel("x1")
+    fig.colorbar(im2, ax=ax2)
 
     plt.savefig(fname=results_dir + title + ".png")
+    plt.show()
 
 
 # In[ ]:
@@ -181,7 +204,7 @@ def train_and_visualize(X, y, title, lengthscale_init=None, signal_variance_init
     inducing_vars = u.numpy()
     
     # Visualize model
-    plot_gp(model, inducing_vars, u_mean, title)
+    plot_gp(model, inducing_vars, inputs, title)
     
     return model, inputs, u_mean, inducing_vars
 
@@ -208,7 +231,7 @@ def uniform_grid(input_dims, num_discrete_per_dim, low=0., high=1.):
     return out
 
 
-# This function is our main metric for the performance of the acquisition function: The closer the model's best guess to the target (in this case, the global minimum of the Forrester function), the better.
+# This function is our main metric for the performance of the acquisition function: The closer the model's best guess to the global minimum, the better.
 
 # In[ ]:
 
@@ -265,7 +288,7 @@ for run in range(num_runs):
 lengthscale_init = None
 signal_variance_init = None
 
-for run in range(num_runs):
+for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
     print("")
     print("==================")
     print("Beginning run %s" % (run))
@@ -293,11 +316,11 @@ for run in range(num_runs):
         # first point and a next input point as the second point
         
         samples = PBO.models.learning_fullgp.get_random_inputs(low=objective_low,
-                                                       high=objective_high,
-                                                       dim=objective_dim,
-                                                       delta=delta,
-                                                       size=num_samples,
-                                                       exclude_inputs=maximizer)
+                                                               high=objective_high,
+                                                               dim=objective_dim,
+                                                               delta=delta,
+                                                               size=num_samples,
+                                                               exclude_inputs=maximizer)
         
         # Calculate EI vals
         ei_vals = PBO.acquisitions.ei.EI(model, maximizer, samples)
@@ -310,7 +333,7 @@ for run in range(num_runs):
             next_idx = L[1]
         else:
             next_idx = L[0]
-            
+        
         next_query = np.zeros((num_choices, input_dims))
         next_query[0, :] = maximizer  # EI only works in binary choices
         next_query[1, :] = samples[next_idx]
@@ -323,6 +346,7 @@ for run in range(num_runs):
         print("Evaluation %s: Training model" % (evaluation))
         model, inputs, u_mean, inducing_vars = train_and_visualize(X, y,  
                                                                    "Run_{}_Evaluation_{}".format(run, evaluation))
+        
         print_summary(model)
 
         # save optimized lengthscale and signal variance for next iteration
@@ -355,4 +379,45 @@ for run in range(num_runs):
 
 pickle.dump((X_results, y_results, best_guess_results), 
             open(results_dir + acquisition_name + "_" + objective_name + "_" + "Xybestguess.p", "wb"))
+
+
+# In[ ]:
+
+
+global_min = np.min(objective(PBO.models.learning_fullgp.get_all_discrete_inputs(objective_low, objective_high, objective_dim, delta)))
+metric = best_guess_results
+ir = objective(metric) - global_min
+mean = np.mean(ir, axis=0)
+std_dev = np.std(ir, axis=0)
+std_err = std_dev / np.sqrt(ir.shape[0])
+
+
+# In[ ]:
+
+
+print("Mean immediate regret at each evaluation averaged across all runs:")
+print(mean)
+
+
+# In[ ]:
+
+
+print("Standard error of immediate regret at each evaluation averaged across all runs:")
+print(std_err)
+
+
+# In[ ]:
+
+
+with open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem" + ".txt", "w") as text_file:
+    print("Mean immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(mean, file=text_file)
+    print("Standard error of immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(std_err, file=text_file)
+
+
+# In[ ]:
+
+
+pickle.dump((mean, std_err), open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem.p", "wb"))
 

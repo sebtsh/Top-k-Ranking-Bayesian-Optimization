@@ -62,27 +62,27 @@ def log(message):
 # In[ ]:
 
 
-objective = PBO.objectives.hartmann3d
-objective_low = 0.
-objective_high = 1.
-objective_name = "Hart3"
+objective = PBO.objectives.six_hump_camel
+objective_low = -1.5
+objective_high = 1.5
+objective_name = "SHC"
 acquisition_name = "DTS"
-experiment_name = "PBO" + "_" + acquisition_name + "_" + objective_name
+experiment_name = acquisition_name + "_" + objective_name
 
 
 # In[ ]:
 
 
 num_runs = 10
-num_evals = 50
+num_evals = 35
 num_samples = 100
 num_choices = 2
-input_dims = 3
+input_dims = 2
 num_maximizers = 20
 num_init_points = 3
 num_inducing_init = 3
-num_discrete_per_dim = 10
-num_fourier_features = 100
+num_discrete_per_dim = 20
+num_fourier_features = 200
 
 
 # In[ ]:
@@ -157,6 +157,23 @@ def visualize_model(query_points, y, m, title="Model", cmap="Spectral"):
 # In[ ]:
 
 
+def std_representation(X, num_choices):
+    """
+    :param X: tensor of shape (num_data, input_dims * num_choices)
+    :return: tensor of shape (num_data, num_choices, input_dims)
+    """
+    input_dims = X.shape[-1] // num_choices
+    ret_val = np.zeros((X.shape[0], num_choices, input_dims))
+    
+    for i in range(num_choices):
+        ret_val[:, i, :] = X[:, input_dims*i:input_dims*(i+1)]
+        
+    return ret_val
+
+
+# In[ ]:
+
+
 def visualize_f_sample(f_vals, cmap="Spectral"):
     fig, (ax1) = plt.subplots(1)
     fig.suptitle('Sampled f values')
@@ -170,23 +187,6 @@ def visualize_f_sample(f_vals, cmap="Spectral"):
     ax1.set_ylabel("x'")
     ax1.axvline(x=0.757, linestyle='--')
     fig.colorbar(im1, ax=ax1)
-
-
-# In[ ]:
-
-
-def std_representation(X, num_choices):
-    """
-    :param X: tensor of shape (num_data, input_dims * num_choices)
-    :return: tensor of shape (num_data, num_choices, input_dims)
-    """
-    input_dims = X.shape[-1] // num_choices
-    ret_val = np.zeros((X.shape[0], num_choices, input_dims))
-    
-    for i in range(num_choices):
-        ret_val[:, i, :] = X[:, input_dims*i:input_dims*(i+1)]
-        
-    return ret_val
 
 
 # In[ ]:
@@ -261,7 +261,7 @@ def train_and_visualize(X, y, lengthscale, title, num_steps=3000):
             print('Loss at step %s: %s' % (i, current_loss))
             break
         prev_loss = current_loss
-        
+    
     visualize_model(X, y, m, title=title)
     return m
 
@@ -339,10 +339,6 @@ for run in range(num_runs):
             cur_idx += 1
 
 init_vals = np.reshape(init_vals, [num_runs, num_combs, num_choices * input_dims])
-# symmetric_vals = np.flip(init_vals, axis=-2)
-# symmetric_points = np.reshape(symmetric_vals, [num_runs, num_combs, num_choices * input_dims])
-
-# init_vals = np.concatenate([init_points, symmetric_points], axis=-2)  # Model always has info about symmetric points
 
 
 # In[ ]:
@@ -367,7 +363,6 @@ best_guess_results = np.zeros([num_runs, num_evals, input_dims])
 
 
 for run in range(num_runs):
-    log("Starting run {}".format(run))
     #Fit a GP with kernel k to Dn
     
     X = init_vals[run]
@@ -398,7 +393,7 @@ for run in range(num_runs):
         # Change by random small values otherwise Fourier features matrix becomes non-invertible
         if np.all(np.equal(x_xprime_next, flip(x_xprime_next))) or x_xprime_next in X:
             for i in range(len(x_xprime_next[0])):
-                if x_xprime_next[0][i] < 0.5:
+                if x_xprime_next[0][i] < 0:
                     x_xprime_next[0][i] += np.random.uniform(low=0., high=1e-3)
                 else:
                     x_xprime_next[0][i] -= np.random.uniform(low=0., high=1e-3)
@@ -441,4 +436,45 @@ for run in range(num_runs):
 
 
 pickle.dump((X_results, y_results, best_guess_results), open(results_dir + "Xybestguess.p", "wb"))
+
+
+# In[ ]:
+
+
+global_min = np.min(objective(discrete_space))
+metric = best_guess_results
+ir = objective(metric) - global_min
+mean = np.mean(ir, axis=0)
+std_dev = np.std(ir, axis=0)
+std_err = std_dev / np.sqrt(ir.shape[0])
+
+
+# In[ ]:
+
+
+print("Mean immediate regret at each evaluation averaged across all runs:")
+print(mean)
+
+
+# In[ ]:
+
+
+print("Standard error of immediate regret at each evaluation averaged across all runs:")
+print(std_err)
+
+
+# In[ ]:
+
+
+with open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem" + ".txt", "w") as text_file:
+    print("Mean immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(mean, file=text_file)
+    print("Standard error of immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(std_err, file=text_file)
+
+
+# In[ ]:
+
+
+pickle.dump((mean, std_err), open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem.p", "wb"))
 

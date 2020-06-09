@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # Preferential Bayesian Optimization: RANDOM
-# This notebook demonstrates the use of random querying on ordinal (preference) data.
+# # Preferential Bayesian Optimization: EI
+# This notebook demonstrates the use of the Expected Improvement (EI) acquisition function on ordinal (preference) data.
 # 
 # Over the CIFAR-10 dataset, we define an arbitrary preference as such (with class number in parentheses):
 # 
@@ -15,7 +15,6 @@ import numpy as np
 import gpflow
 import tensorflow as tf
 import tensorflow_probability as tfp
-
 import matplotlib.pyplot as plt
 import sys
 import os
@@ -68,27 +67,8 @@ objective = lambda x: PBO.objectives.cifar(x, embedding_to_class)
 objective_low = np.min(cifar_embedding)
 objective_high = np.max(cifar_embedding)
 objective_name = "CIFAR"
-acquisition_name = "RANDOM"
-experiment_name = "PBO" + "_" + acquisition_name + "_" + objective_name + "FullGP"
-
-
-# In[ ]:
-
-
-def get_class(x):
-    """
-    :param x: tensor of shape (..., 2). CIFAR-10 embeddings
-    :return: tensor of shape (..., 1). last dim is int from 0-9 representing class
-    """
-    shape = x.shape[:-1]
-    raveled = np.reshape(x, [-1, 2])
-    raveled_shape = raveled.shape[:-1]
-    raveled_classes = np.zeros((raveled_shape[0], 1), dtype=np.int8)
-    
-    for i in range(raveled_shape[0]):
-        raveled_classes[i] = embedding_to_class[raveled[i].data.tobytes()]
-        
-    return np.reshape(raveled_classes, shape + (1,))
+acquisition_name = "EI"
+experiment_name = acquisition_name + "_" + objective_name
 
 
 # In[ ]:
@@ -118,6 +98,25 @@ try:
     print("Directory " , results_dir ,  " created ") 
 except FileExistsError:
     print("Directory " , results_dir ,  " already exists")
+
+
+# In[ ]:
+
+
+def get_class(x):
+    """
+    :param x: tensor of shape (..., 2). CIFAR-10 embeddings
+    :return: tensor of shape (..., 1). last dim is int from 0-9 representing class
+    """
+    shape = x.shape[:-1]
+    raveled = np.reshape(x, [-1, 2])
+    raveled_shape = raveled.shape[:-1]
+    raveled_classes = np.zeros((raveled_shape[0], 1), dtype=np.int8)
+    
+    for i in range(raveled_shape[0]):
+        raveled_classes[i] = embedding_to_class[raveled[i].data.tobytes()]
+        
+    return np.reshape(raveled_classes, shape + (1,))
 
 
 # In[ ]:
@@ -270,7 +269,7 @@ def pref_inversions(model):
 # In[ ]:
 
 
-def get_maximizing_class(model):
+def get_maximizing_class(model):   
     fvals = model.predict_f(cifar_embedding)[0]
     indices = get_class(cifar_embedding)
     
@@ -282,6 +281,15 @@ def get_maximizing_class(model):
 
 
 # Store the results in these arrays:
+
+# In[ ]:
+
+
+def get_maximizer(model, data):
+    fvals = model.predict_f(data)[0]
+    argmax = np.argmax(fvals)
+    return data[argmax]
+
 
 # In[ ]:
 
@@ -318,29 +326,47 @@ for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
 
     for evaluation in range(num_evals):
         print("Beginning evaluation %s" % (evaluation)) 
+
+        # Get incumbent maximizer
+        maximizer = np.expand_dims(get_maximizer(model, inputs), axis=0)  # (1, input_dims)
+        
+        print("Maximizer:")
+        print(maximizer)
         
         success = False
         fail_count = 0
         while not success:
-            print("Beginning evaluation %s" % (evaluation))
+            # Sample possible next input points. In EI, all queries are a pair with the incumbent maximizer as the 
+            # first point and a next input point as the second point
 
-            existing_idx = np.random.randint(0, inputs.shape[0])
-            existing_input = inputs[existing_idx]
-            random_input = cifar_embedding[np.random.choice(cifar_embedding.shape[0])]
+            random_indices = np.random.choice(cifar_embedding.shape[0], (num_samples))
+            samples = np.take(cifar_embedding, random_indices, axis=0)  # (num_samples, input_dims)
 
+            # Calculate EI vals
+            ei_vals = PBO.acquisitions.ei.EI(model, maximizer, samples)
+            L = np.argsort(np.ravel(-ei_vals))  # n-th element in this (num_samples, ) size array is the index of n-th
+            #largest element in ei_vals
+
+            # Select query that maximizes EI
+            if np.all(np.equal(samples[L[0]], maximizer)):  #if value with highest EI is same as maximizer, pick the next
+                # highest value. Else pick this
+                next_idx = L[1]
+            else:
+                next_idx = L[0]
+                
             next_query = np.zeros((num_choices, input_dims))
-            next_query[0, :] = existing_input
-            next_query[1, :] = random_input
-            print("Evaluation %s: Next query is %s" % (evaluation, next_query))
+            next_query[0, :] = maximizer  # EI only works in binary choices
+            next_query[1, :] = samples[next_idx]
+            print("Evaluation %s: Next query is %s with EI value of %s" % (evaluation, next_query, ei_vals[next_idx]))
 
             X_temp = np.concatenate([X, [next_query]])
             # Evaluate objective function
             y_temp = np.concatenate([y, get_noisy_observation(np.expand_dims(next_query, axis=0), objective)], axis=0)
-            
+
+            print("Evaluation %s: Training model" % (evaluation))
             try:
-                print("Evaluation %s: Training model" % (evaluation))
-                model, inputs, u_mean, inducing_vars = train_and_visualize(X_temp, y_temp, 
-                                                                           "Run_{}_Evaluation_{}".format(run, evaluation))
+                model, inputs, u_mean, inducing_vars = train_and_visualize(X_temp, y_temp,
+                                                                       "Run_{}_Evaluation_{}".format(run, evaluation))
                 success = True
             except ValueError as err:
                 print(err)
@@ -350,9 +376,10 @@ for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
             if fail_count >= 10:
                 print("Retry limit exceeded")
                 raise ValueError("Failed")
-                
+        
         X = X_temp
         y = y_temp
+        
         # Save model
         pickle.dump((X, y, inputs, 
                      model.kernel.variance, 
@@ -360,12 +387,13 @@ for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
                      model.likelihood.variance, 
                      inducing_vars, 
                      model.q_mu, 
-                     model.q_sqrt), 
+                     model.q_sqrt, 
+                     maximizer), 
                     open(results_dir + "Model_Run_{}_Evaluation_{}.p".format(run, evaluation), "wb"))
 
         inversion_results[run, evaluation] = pref_inversions(model)
         max_class_results[run, evaluation] = get_maximizing_class(model)
-        
+
         print("Inversions: {}, maximizing class: {}".format(inversion_results[run, evaluation], 
                                                    max_class_results[run, evaluation]))
 
@@ -376,5 +404,54 @@ for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
 # In[ ]:
 
 
-pickle.dump((X_results, y_results, inversion_results, max_class_results), open(results_dir + "RANDOM_CIFAR_runs2-10.p", "wb"))
+pickle.dump((X_results, y_results, inversion_results, max_class_results), open(results_dir + "EI_CIFAR.p", "wb"))
+
+
+# In[ ]:
+
+
+class_to_ir = {0:0, 1:1, 8:2, 9:3, 2:4, 3:5, 4:6, 5:7, 6:8, 7:9}
+
+
+# In[ ]:
+
+
+ir = np.zeros(max_class_results.shape)
+for i in range(num_runs):
+    for j in range(num_evals):
+        ir[i, j] = max_class_results[i, j]
+        
+mean = np.mean(ir, axis=0)
+std_dev = np.std(ir, axis=0)
+std_err = std_dev / np.sqrt(ir.shape[0])
+
+
+# In[ ]:
+
+
+print("Mean immediate regret at each evaluation averaged across all runs:")
+print(mean)
+
+
+# In[ ]:
+
+
+print("Standard error of immediate regret at each evaluation averaged across all runs:")
+print(std_err)
+
+
+# In[ ]:
+
+
+with open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem" + ".txt", "w") as text_file:
+    print("Mean immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(mean, file=text_file)
+    print("Standard error of immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(std_err, file=text_file)
+
+
+# In[ ]:
+
+
+pickle.dump((mean, std_err), open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem.p", "wb"))
 

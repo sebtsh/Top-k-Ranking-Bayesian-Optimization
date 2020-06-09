@@ -77,7 +77,7 @@ objective_low = np.min(cifar_embedding)
 objective_high = np.max(cifar_embedding)
 objective_name = "CIFAR"
 acquisition_name = "DTS"
-experiment_name = "PBO" + "_" + acquisition_name + "_" + objective_name
+experiment_name = acquisition_name + "_" + objective_name
 
 
 # In[ ]:
@@ -429,4 +429,59 @@ for run in range(num_runs):
 
 
 pickle.dump((X_results, y_results, inversion_results, max_class_results), open(results_dir + "Xybestguess.p", "wb"))
+
+
+# In[ ]:
+
+
+class_to_ir = {0:0, 1:1, 8:2, 9:3, 2:4, 3:5, 4:6, 5:7, 6:8, 7:9}
+
+
+# In[ ]:
+
+
+ir = np.zeros(max_class_results.shape)
+for i in range(num_runs):
+    for j in range(num_evals):
+        ir[i, j] = max_class_results[i, j]
+        
+mean = np.mean(ir, axis=0)
+std_dev = np.std(ir, axis=0)
+std_err = std_dev / np.sqrt(ir.shape[0])
+
+
+# In[ ]:
+
+
+print("Mean immediate regret at each evaluation averaged across all runs:")
+print(mean)
+
+
+# In[ ]:
+
+
+print("Standard error of immediate regret at each evaluation averaged across all runs:")
+print(std_err)
+
+
+# In[ ]:
+
+
+with open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem" + ".txt", "w") as text_file:
+    print("Mean immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(mean, file=text_file)
+    print("Standard error of immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(std_err, file=text_file)
+
+
+# In[ ]:
+
+
+pickle.dump((mean, std_err), open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem.p", "wb"))
+
+
+# In[ ]:
+
+
+
 

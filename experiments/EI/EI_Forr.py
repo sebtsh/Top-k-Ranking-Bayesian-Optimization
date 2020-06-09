@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # Preferential Bayesian Optimization: Multinomial Predictive Entropy Search
-# This notebook demonstrates the use of the Multinomial Predictive Entropy Search (MPES) acquisition function on ordinal (preference) data.
+# # Preferential Bayesian Optimization: EI
+# This notebook demonstrates the use of the Expected Improvement (EI) acquisition function on ordinal (preference) data.
 
 # In[ ]:
 
@@ -10,6 +10,7 @@
 import numpy as np
 import gpflow
 import tensorflow as tf
+import tensorflow_probability as tfp
 import matplotlib.pyplot as plt
 import sys
 import os
@@ -46,27 +47,32 @@ if gpus:
 # In[ ]:
 
 
-objective = PBO.objectives.six_hump_camel
-objective_low = -1.5
-objective_high = 1.5
-objective_name = "SHC"
-acquisition_name = "PES"
-experiment_name = "PBO" + "_" + acquisition_name + "_" + objective_name + "FullGP"
+lengthscale = 0.05
+lengthscale_prior_alpha = tf.constant(2, dtype=tf.float64)
+lengthscale_prior_beta = tf.constant(4, dtype=tf.float64)
+
+
+# In[ ]:
+
+
+objective = PBO.objectives.forrester
+objective_low = 0.
+objective_high = 1.
+objective_name = "Forrester"
+acquisition_name = "EI"
+experiment_name = acquisition_name + "_" + objective_name
 
 
 # In[ ]:
 
 
 num_runs = 10
-num_evals = 35
-num_samples = 1000
+num_evals = 20
 num_choices = 2
-input_dims = 2
+input_dims = 1
 objective_dim = input_dims # CHANGE 1: require the objective dim
 num_maximizers = 20
-num_maximizers_init = 50
-num_fourier_features = 1000
-num_init_prefs = 6 # CHANGE 2: randomly initialize with some preferences
+num_init_prefs = 5 # CHANGE 2: randomly initialize with some preferences
 
 # CHANGE 1: reduce the value of delta to avoid numerical error
 # as k(x,x') = sigma^2 * exp( -[(x-x')/l]^2 )
@@ -75,8 +81,9 @@ num_init_prefs = 6 # CHANGE 2: randomly initialize with some preferences
 #   It is ok for the total number of observations > the total number of possible inputs
 # because there is a noise in the observation, it might require repeated observations 
 # at the same input pair to improve the confidence 
-num_discrete_per_dim = 40
+num_discrete_per_dim = 60
 delta = (objective_high - objective_low) / num_discrete_per_dim
+num_samples = num_discrete_per_dim-1  # for 1-D case
 
 
 # In[ ]:
@@ -92,73 +99,46 @@ except FileExistsError:
     print("Directory " , results_dir ,  " already exists")
 
 
-# Plot of the SHC function (global min at at x = [0.0898, -0.7126] and x = [-0.0898, 0.7126]):
+# Plot of the Forrester function (global min at ~0.757):
 
 # In[ ]:
 
 
-# CHANGE 4: use a discrete grid of with cells of size = delta
-inputs = PBO.models.learning_fullgp.get_all_discrete_inputs(objective_low, objective_high, objective_dim, delta)
-fvals = objective(inputs).reshape(num_discrete_per_dim, num_discrete_per_dim)
-
-
-# In[ ]:
-
-
-fig, ax = plt.subplots()
-im = ax.imshow(fvals,
-          interpolation="nearest",
-         extent=(objective_low, objective_high, objective_low, objective_high),
-         origin="lower",
-         cmap="Spectral")
-fig.colorbar(im, ax=ax)
-plt.show()
+xx = np.linspace(0.0, 1.0, 100).reshape(100, 1)
+plt.figure(figsize=(12, 6))
+plt.plot(xx, objective(xx), 'C0', linewidth=1)
+plt.xlim(-0.0, 1.0)
 
 
 # In[ ]:
 
 
-def plot_gp(model, inducing_points, inputs, title, cmap="Spectral"):
+def plot_gp(model, X, y, title, cmap="Spectral"):
+    #Plotting code from GPflow authors
 
-    side = np.linspace(objective_low, objective_high, num_discrete_per_dim)
-    combs = PBO.acquisitions.dts.combinations(np.expand_dims(side, axis=1))
-    predictions = model.predict_y(combs)
-    preds = tf.transpose(tf.reshape(predictions[0], [num_discrete_per_dim, num_discrete_per_dim]))
-    variances = tf.transpose(tf.reshape(predictions[1], [num_discrete_per_dim, num_discrete_per_dim]))
+    ## generate test points for prediction
+    xx = np.linspace(-0.1, 1.1, 100).reshape(100, 1)  # test points must be of shape (N, D)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2)
-    fig.suptitle(title)
-    fig.set_size_inches(18.5, 6.88)
-    fig.set_dpi((200))
+    ## predict mean and variance of latent GP at test points
+    mean, var = model.predict_f(xx)
 
-    ax1.axis('equal')
-    im1 = ax1.imshow(preds, 
-                     interpolation='nearest', 
-                     extent=(objective_low, objective_high, objective_low, objective_high), 
-                     origin='lower', 
-                     cmap=cmap)
-    ax1.plot(inducing_points[:, 0], inducing_points[:, 1], 'kx', mew=2)
-    ax1.plot(inputs[:, 0], inputs[:, 1], 'ko', mew=2, color='w')
-    ax1.set_title("Mean")
-    ax1.set_xlabel("x0")
-    ax1.set_ylabel("x1")
-    fig.colorbar(im1, ax=ax1)
+    ## generate 10 samples from posterior
+    samples = model.predict_f_samples(xx, 10)  # shape (10, 100, 1)
 
-    ax2.axis('equal')
-    im2 = ax2.imshow(variances, 
-                     interpolation='nearest', 
-                     extent=(objective_low, objective_high, objective_low, objective_high), 
-                     origin='lower', 
-                     cmap=cmap)
-    ax2.plot(inducing_points[:, 0], inducing_points[:, 1], 'kx', mew=2)
-    ax2.plot(inputs[:, 0], inputs[:, 1], 'ko', mew=2, color='w')
-    ax2.set_title("Variance")
-    ax2.set_xlabel("x0")
-    ax2.set_ylabel("x1")
-    fig.colorbar(im2, ax=ax2)
+    ## plot 
+    plt.figure(figsize=(12, 6))
+    plt.plot(X, y, 'kx', mew=2)
+    plt.plot(xx, mean, 'C0', lw=2)
+    plt.fill_between(xx[:,0],
+                     mean[:,0] - 1.96 * np.sqrt(var[:,0]),
+                     mean[:,0] + 1.96 * np.sqrt(var[:,0]),
+                     color='C0', alpha=0.2)
+
+    plt.plot(xx, samples[:, :, 0].numpy().T, 'C0', linewidth=.5)
+    plt.xlim(-0.1, 1.1)
+    plt.title(title)
 
     plt.savefig(fname=results_dir + title + ".png")
-    plt.show()
 
 
 # In[ ]:
@@ -173,6 +153,8 @@ def get_noisy_observation(X, objective):
 
 
 def train_and_visualize(X, y, title, lengthscale_init=None, signal_variance_init=None):
+    lengthscale_prior = tfp.distributions.Gamma(concentration=lengthscale_prior_alpha,
+                                               rate=lengthscale_prior_beta)
     
     # Train model with data
     # CHANGE 6: use full_gp instead of sparse, 
@@ -199,12 +181,34 @@ def train_and_visualize(X, y, title, lengthscale_init=None, signal_variance_init
     inducing_vars = u.numpy()
     
     # Visualize model
-    plot_gp(model, inducing_vars, inputs, title)
+    plot_gp(model, inducing_vars, u_mean, title)
     
     return model, inputs, u_mean, inducing_vars
 
 
-# This function is our main metric for the performance of the acquisition function: The closer the model's best guess to the global minimum, the better.
+# In[ ]:
+
+
+def uniform_grid(input_dims, num_discrete_per_dim, low=0., high=1.):
+    """
+    Returns an array with all possible permutations of discrete values in input_dims number of dimensions.
+    :param input_dims: int
+    :param num_discrete_per_dim: int
+    :param low: int
+    :param high: int
+    :return: tensor of shape (num_discrete_per_dim ** input_dims, input_dims)
+    """
+    num_points = num_discrete_per_dim ** input_dims
+    out = np.zeros([num_points, input_dims])
+    discrete_points = np.linspace(low, high, num_discrete_per_dim)
+    for i in range(num_points):
+        for dim in range(input_dims):
+            val = num_discrete_per_dim ** (dim)
+            out[i, dim] = discrete_points[int((i // val) % num_discrete_per_dim)]
+    return out
+
+
+# This function is our main metric for the performance of the acquisition function: The closer the model's best guess to the target (in this case, the global minimum of the Forrester function), the better.
 
 # In[ ]:
 
@@ -252,12 +256,6 @@ for run in range(num_runs):
                                 exclude_inputs=None)
 
 
-# In[ ]:
-
-
-print(init_vals.shape)
-
-
 # The following loops carry out the Bayesian optimization algorithm over a number of runs, with a fixed number of evaluations per run.
 
 # In[ ]:
@@ -267,7 +265,7 @@ print(init_vals.shape)
 lengthscale_init = None
 signal_variance_init = None
 
-for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
+for run in range(num_runs):
     print("")
     print("==================")
     print("Beginning run %s" % (run))
@@ -284,34 +282,39 @@ for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
     for evaluation in range(num_evals):
         print("Beginning evaluation %s" % (evaluation)) 
 
-        # Sample possible next queries
-        # CHANGE 10: use discrete grid
-        samples = PBO.models.learning_fullgp.sample_inputs(inputs.numpy(), 
-                                                        num_samples, 
-                                                        num_choices, 
-                                                        min_val=objective_low, 
-                                                        max_val=objective_high, 
-                                                        delta=delta)
-
-        # Sample maximizers
-        print("Evaluation %s: Sampling maximizers" % (evaluation))
-        maximizers = PBO.fourier_features.sample_maximizers(X=inducing_vars,
-                                                            count=num_maximizers,
-                                                            n_init=num_maximizers_init,
-                                                            D=num_fourier_features,
-                                                            model=model,
-                                                            min_val=objective_low,
-                                                            max_val=objective_high)
-        print(maximizers)
-
-        # Calculate PES value I for each possible next query
-        print("Evaluation %s: Calculating I" % (evaluation))
-        I_vals = PBO.acquisitions.pes.I_batch(samples, maximizers, model)
-
-        # Select query that maximizes I
-        next_idx = np.argmax(I_vals)
-        next_query = samples[next_idx]
-        print("Evaluation %s: Next query is %s with I value of %s" % (evaluation, next_query, I_vals[next_idx]))
+        # Get incumbent maximizer
+        input_vals = model.predict_f(inputs)[0].numpy()
+        maximizer = np.expand_dims(inputs[np.argmax(input_vals)], axis=0)
+        
+        print("Maximizer:")
+        print(maximizer)
+        
+        # Sample possible next input points. In EI, all queries are a pair with the incumbent maximizer as the 
+        # first point and a next input point as the second point
+        
+        samples = PBO.models.learning_fullgp.get_random_inputs(low=objective_low,
+                                                       high=objective_high,
+                                                       dim=objective_dim,
+                                                       delta=delta,
+                                                       size=num_samples,
+                                                       exclude_inputs=maximizer)
+        
+        # Calculate EI vals
+        ei_vals = PBO.acquisitions.ei.EI(model, maximizer, samples)
+        L = np.argsort(np.ravel(-ei_vals))  # n-th element in this (num_samples, ) size array is the index of n-th
+        #largest element in ei_vals
+        
+        # Select query that maximizes EI
+        if np.all(np.equal(samples[L[0]], maximizer)):  #if value with highest EI is same as maximizer, pick the next
+            # highest value. Else pick this
+            next_idx = L[1]
+        else:
+            next_idx = L[0]
+            
+        next_query = np.zeros((num_choices, input_dims))
+        next_query[0, :] = maximizer  # EI only works in binary choices
+        next_query[1, :] = samples[next_idx]
+        print("Evaluation %s: Next query is %s with EI value of %s" % (evaluation, next_query, ei_vals[next_idx]))
 
         X = np.concatenate([X, [next_query]])
         # Evaluate objective function
@@ -340,9 +343,9 @@ for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
                      inducing_vars, 
                      model.q_mu, 
                      model.q_sqrt, 
-                     maximizers), 
+                     maximizer), 
                     open(results_dir + "Model_Run_{}_Evaluation_{}.p".format(run, evaluation), "wb"))
-        
+
     X_results[run] = X
     y_results[run] = y
 
@@ -352,4 +355,45 @@ for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
 
 pickle.dump((X_results, y_results, best_guess_results), 
             open(results_dir + acquisition_name + "_" + objective_name + "_" + "Xybestguess.p", "wb"))
+
+
+# In[ ]:
+
+
+global_min = np.min(objective(PBO.models.learning_fullgp.get_all_discrete_inputs(objective_low, objective_high, objective_dim, delta)))
+metric = best_guess_results
+ir = objective(metric) - global_min
+mean = np.mean(ir, axis=0)
+std_dev = np.std(ir, axis=0)
+std_err = std_dev / np.sqrt(ir.shape[0])
+
+
+# In[ ]:
+
+
+print("Mean immediate regret at each evaluation averaged across all runs:")
+print(mean)
+
+
+# In[ ]:
+
+
+print("Standard error of immediate regret at each evaluation averaged across all runs:")
+print(std_err)
+
+
+# In[ ]:
+
+
+with open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem" + ".txt", "w") as text_file:
+    print("Mean immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(mean, file=text_file)
+    print("Standard error of immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(std_err, file=text_file)
+
+
+# In[ ]:
+
+
+pickle.dump((mean, std_err), open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem.p", "wb"))
 

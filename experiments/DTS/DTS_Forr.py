@@ -67,7 +67,7 @@ objective_low = 0.
 objective_high = 1.
 objective_name = "Forrester"
 acquisition_name = "DTS"
-experiment_name = "PBO" + "_" + acquisition_name + "_" + objective_name
+experiment_name = acquisition_name + "_" + objective_name
 
 
 # In[ ]:
@@ -436,4 +436,45 @@ for run in range(num_runs):
 
 
 pickle.dump((X_results, y_results, best_guess_results), open(results_dir + "Xybestguess.p", "wb"))
+
+
+# In[ ]:
+
+
+global_min = np.min(objective(discrete_space))
+metric = best_guess_results
+ir = objective(metric) - global_min
+mean = np.mean(ir, axis=0)
+std_dev = np.std(ir, axis=0)
+std_err = std_dev / np.sqrt(ir.shape[0])
+
+
+# In[ ]:
+
+
+print("Mean immediate regret at each evaluation averaged across all runs:")
+print(mean)
+
+
+# In[ ]:
+
+
+print("Standard error of immediate regret at each evaluation averaged across all runs:")
+print(std_err)
+
+
+# In[ ]:
+
+
+with open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem" + ".txt", "w") as text_file:
+    print("Mean immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(mean, file=text_file)
+    print("Standard error of immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(std_err, file=text_file)
+
+
+# In[ ]:
+
+
+pickle.dump((mean, std_err), open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem.p", "wb"))
 

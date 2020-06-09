@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # Preferential Bayesian Optimization: Multinomial Predictive Entropy Search
-# This notebook demonstrates the use of the Multinomial Predictive Entropy Search (MPES) acquisition function on ordinal (preference) data.
+# # Preferential Bayesian Optimization: EI
+# This notebook demonstrates the use of the Expected Improvement (EI) acquisition function on ordinal (preference) data.
 
 # In[ ]:
 
@@ -21,14 +21,6 @@ gpflow.config.set_default_summary_fmt("notebook")
 
 sys.path.append(os.path.split(os.path.split(os.path.split(os.getcwd())[0])[0])[0]) # Move 3 levels up directory to import PBO
 import PBO
-
-
-# In[ ]:
-
-
-plt.rcParams["font.family"] = "serif"
-plt.rcParams["font.size"] = 16
-plt.rcParams["mathtext.fontset"] = "dejavuserif"
 
 
 # In[ ]:
@@ -55,27 +47,33 @@ if gpus:
 # In[ ]:
 
 
-objective = PBO.objectives.forrester
-objective_low = 0.
+lengthscale = 0.3
+lengthscale_prior_alpha = tf.constant(2, dtype=tf.float64)
+lengthscale_prior_beta = tf.constant(4, dtype=tf.float64)
+
+
+# In[ ]:
+
+
+objective = PBO.objectives.hartmann3d
+objective_low = 0
 objective_high = 1.
-objective_name = "Forrester"
-acquisition_name = "PES"
-experiment_name = "PBO" + "_" + acquisition_name + "_" + objective_name + "FullGP"
+objective_name = "Hart3"
+acquisition_name = "EI"
+experiment_name = acquisition_name + "_" + objective_name
 
 
 # In[ ]:
 
 
 num_runs = 10
-num_evals = 20
-num_samples = 100
+num_evals = 50
+num_samples = 1000
 num_choices = 2
-input_dims = 1
-objective_dim = input_dims
+input_dims = 3
+objective_dim = input_dims # CHANGE 1: require the objective dim
 num_maximizers = 20
-num_maximizers_init = 50
-num_fourier_features = 1000
-num_init_prefs = 5
+num_init_prefs = 12 # CHANGE 2: randomly initialize with some preferences
 
 # CHANGE 1: reduce the value of delta to avoid numerical error
 # as k(x,x') = sigma^2 * exp( -[(x-x')/l]^2 )
@@ -84,7 +82,7 @@ num_init_prefs = 5
 #   It is ok for the total number of observations > the total number of possible inputs
 # because there is a noise in the observation, it might require repeated observations 
 # at the same input pair to improve the confidence 
-num_discrete_per_dim = 60
+num_discrete_per_dim = 20
 delta = (objective_high - objective_low) / num_discrete_per_dim
 
 
@@ -101,53 +99,6 @@ except FileExistsError:
     print("Directory " , results_dir ,  " already exists")
 
 
-# Plot of the Forrester function (global min at ~0.757):
-
-# In[ ]:
-
-
-xx = np.linspace(0.0, 1.0, 100).reshape(100, 1)
-plt.figure(figsize=(12, 6), dpi=200)
-plt.plot(xx, -objective(xx), 'C0', linewidth=1)
-plt.plot(0.757, 6.02074, 'kx')
-plt.text(0.757, 6.02074, '    (0.757, 6.02)')
-plt.title("Forrester")
-plt.xlabel("$x$")
-plt.ylabel('$f(x)$')
-plt.xlim(-0.0, 1.0)
-
-
-# In[ ]:
-
-
-def plot_gp(model, X, y, title, cmap="Spectral"):
-    #Plotting code from GPflow authors
-
-    ## generate test points for prediction
-    xx = np.linspace(-0.1, 1.1, 100).reshape(100, 1)  # test points must be of shape (N, D)
-
-    ## predict mean and variance of latent GP at test points
-    mean, var = model.predict_f(xx)
-
-    ## generate 10 samples from posterior
-    samples = model.predict_f_samples(xx, 10)  # shape (10, 100, 1)
-
-    ## plot 
-    plt.figure(figsize=(12, 6))
-    plt.plot(X, y, 'kx', mew=2)
-    plt.plot(xx, mean, 'C0', lw=2)
-    plt.fill_between(xx[:,0],
-                     mean[:,0] - 1.96 * np.sqrt(var[:,0]),
-                     mean[:,0] + 1.96 * np.sqrt(var[:,0]),
-                     color='C0', alpha=0.2)
-
-    plt.plot(xx, samples[:, :, 0].numpy().T, 'C0', linewidth=.5)
-    plt.xlim(-0.1, 1.1)
-    plt.title(title)
-
-    plt.savefig(fname=results_dir + title + ".png")
-
-
 # In[ ]:
 
 
@@ -160,8 +111,11 @@ def get_noisy_observation(X, objective):
 
 
 def train_and_visualize(X, y, title, lengthscale_init=None, signal_variance_init=None):
-
-    # Train model with data 
+    lengthscale_prior = tfp.distributions.Gamma(concentration=lengthscale_prior_alpha,
+                                               rate=lengthscale_prior_beta)
+    
+    # Train model with data
+    # CHANGE 6: use full_gp instead of sparse, 
     result = PBO.models.learning_fullgp.train_model_fullcov(
                         X, y, 
                         obj_low=objective_low,
@@ -178,14 +132,11 @@ def train_and_visualize(X, y, title, lengthscale_init=None, signal_variance_init
     u = result['u']
     inputs = result['inputs']
     k = result['kernel']
-        
+    
     likelihood = gpflow.likelihoods.Gaussian()
     model = PBO.models.learning.init_SVGP_fullcov(q_mu, q_sqrt, u, k, likelihood)
     u_mean = q_mu.numpy()
     inducing_vars = u.numpy()
-    
-    # Visualize model
-    plot_gp(model, inducing_vars, u_mean, title)
     
     return model, inputs, u_mean, inducing_vars
 
@@ -212,7 +163,7 @@ def uniform_grid(input_dims, num_discrete_per_dim, low=0., high=1.):
     return out
 
 
-# This function is our main metric for the performance of the acquisition function: The closer the model's best guess to the target (in this case, the global minimum of the Forrester function), the better.
+# This function is our main metric for the performance of the acquisition function: The closer the model's best guess to the global minimum, the better.
 
 # In[ ]:
 
@@ -221,6 +172,7 @@ def best_guess(model):
     """
     Returns a GP model's best guess of the global maximum of f.
     """
+    # CHANGE 7: use a discrete grid
     xx = PBO.models.learning_fullgp.get_all_discrete_inputs(objective_low, objective_high, objective_dim, delta)
     res = model.predict_f(xx)[0].numpy()
     return xx[np.argmax(res)]
@@ -244,6 +196,7 @@ best_guess_results = np.zeros([num_runs, num_evals, input_dims])
 
 np.random.seed(0)
 
+# CHANGE 8: just randomly initialize with some preference observation
 init_vals = np.zeros([num_runs, num_init_prefs, num_choices, input_dims])
 
 for run in range(num_runs):
@@ -263,11 +216,11 @@ for run in range(num_runs):
 # In[ ]:
 
 
-# CHANGE 2: remove the lengthscale_init and signal_variance_init
-# as it makes the optimization stuck in local optima (a very small lengthscale)
-# At each iteration, we optimize with the initial lengthscale = (objective_high - objective_low) / 2
-# so that it can discover an optima with large lengthscale instead
-for run in range(num_runs):
+# CHANGE 9: need to store lengthscale and signal_variance from previous iteration to initialize the current iteration
+lengthscale_init = None
+signal_variance_init = None
+
+for run in range(num_runs):  # CHECK IF STARTING RUN IS CORRECT
     print("")
     print("==================")
     print("Beginning run %s" % (run))
@@ -277,37 +230,48 @@ for run in range(num_runs):
     
     model, inputs, u_mean, inducing_vars = train_and_visualize(X, y, 
                                                         "Run_{}:_Initial_model".format(run))
+    # save optimized lengthscale and signal variance for next iteration
+    lengthscale_init = model.kernel.lengthscale.numpy()
+    signal_variance_init = model.kernel.variance.numpy()
     
     for evaluation in range(num_evals):
-        print("Beginning evaluation %s" % (evaluation))
+        print("Beginning evaluation %s" % (evaluation)) 
 
-        # Sample possible next queries
-        samples = PBO.models.learning_fullgp.sample_inputs(inputs.numpy(), 
-                                                        num_samples, 
-                                                        num_choices, 
-                                                        min_val=objective_low, 
-                                                        max_val=objective_high, 
-                                                        delta=delta)
-    
-        # Sample maximizers
-        print("Evaluation %s: Sampling maximizers" % (evaluation))
-        maximizers = PBO.fourier_features.sample_maximizers(X=inducing_vars,
-                                                            count=num_maximizers,
-                                                            n_init=num_maximizers_init,
-                                                            D=num_fourier_features,
-                                                            model=model,
-                                                            min_val=objective_low,
-                                                            max_val=objective_high)
-        print(maximizers)
+        # Get incumbent maximizer
+        input_vals = model.predict_f(inputs)[0].numpy()
+        maximizer = np.expand_dims(inputs[np.argmax(input_vals)], axis=0)
+        
+        print("Maximizer:")
+        print(maximizer)
+        
+        # Sample possible next input points. In EI, all queries are a pair with the incumbent maximizer as the 
+        # first point and a next input point as the second point
+        
+        samples = PBO.models.learning_fullgp.get_random_inputs(low=objective_low,
+                                                               high=objective_high,
+                                                               dim=objective_dim,
+                                                               delta=delta,
+                                                               size=num_samples,
+                                                               exclude_inputs=maximizer)
 
-        # Calculate PES value I for each possible next query
-        print("Evaluation %s: Calculating I" % (evaluation))
-        I_vals = PBO.acquisitions.pes.I_batch(samples, maximizers, model)
-
-        # Select query that maximizes I
-        next_idx = np.argmax(I_vals)
-        next_query = samples[next_idx]
-        print("Evaluation %s: Next query is %s with I value of %s" % (evaluation, next_query, I_vals[next_idx]))
+        
+        # Calculate EI vals
+        ei_vals = PBO.acquisitions.ei.EI(model, maximizer, samples)
+        
+        L = np.argsort(np.ravel(-ei_vals))  # n-th element in this (num_samples, ) size array is the index of n-th
+        #largest element in ei_vals
+        
+        # Select query that maximizes EI
+        if np.all(np.equal(samples[L[0]], maximizer)):  #if value with highest EI is same as maximizer, pick the next
+            # highest value. Else pick this
+            next_idx = L[1]
+        else:
+            next_idx = L[0]
+            
+        next_query = np.zeros((num_choices, input_dims))
+        next_query[0, :] = maximizer  # EI only works in binary choices
+        next_query[1, :] = samples[next_idx]
+        print("Evaluation %s: Next query is %s with EI value of %s" % (evaluation, next_query, ei_vals[next_idx]))
 
         X = np.concatenate([X, [next_query]])
         # Evaluate objective function
@@ -316,15 +280,19 @@ for run in range(num_runs):
         print("Evaluation %s: Training model" % (evaluation))
         model, inputs, u_mean, inducing_vars = train_and_visualize(X, y,  
                                                                    "Run_{}_Evaluation_{}".format(run, evaluation))
+        
         print_summary(model)
 
-        best_guess_results[run, evaluation, :] = best_guess(model)
+        # save optimized lengthscale and signal variance for next iteration
+        lengthscale_init = model.kernel.lengthscale.numpy()
+        signal_variance_init = model.kernel.variance.numpy()
 
+        best_guess_results[run, evaluation, :] = best_guess(model)
+        # CHANGE 11: log both the estimated minimizer and its objective value
         print("Best_guess f({}) = {}".format(
                 best_guess_results[run, evaluation, :], 
                 objective(best_guess_results[run, evaluation, :])))
         
-                
         # Save model
         pickle.dump((X, y, inputs, 
                      model.kernel.variance, 
@@ -333,7 +301,7 @@ for run in range(num_runs):
                      inducing_vars, 
                      model.q_mu, 
                      model.q_sqrt, 
-                     maximizers), 
+                     maximizer), 
                     open(results_dir + "Model_Run_{}_Evaluation_{}.p".format(run, evaluation), "wb"))
 
     X_results[run] = X
@@ -345,4 +313,45 @@ for run in range(num_runs):
 
 pickle.dump((X_results, y_results, best_guess_results), 
             open(results_dir + acquisition_name + "_" + objective_name + "_" + "Xybestguess.p", "wb"))
+
+
+# In[ ]:
+
+
+global_min = np.min(objective(PBO.models.learning_fullgp.get_all_discrete_inputs(objective_low, objective_high, objective_dim, delta)))
+metric = best_guess_results
+ir = objective(metric) - global_min
+mean = np.mean(ir, axis=0)
+std_dev = np.std(ir, axis=0)
+std_err = std_dev / np.sqrt(ir.shape[0])
+
+
+# In[ ]:
+
+
+print("Mean immediate regret at each evaluation averaged across all runs:")
+print(mean)
+
+
+# In[ ]:
+
+
+print("Standard error of immediate regret at each evaluation averaged across all runs:")
+print(std_err)
+
+
+# In[ ]:
+
+
+with open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem" + ".txt", "w") as text_file:
+    print("Mean immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(mean, file=text_file)
+    print("Standard error of immediate regret at each evaluation averaged across all runs:", file=text_file)
+    print(std_err, file=text_file)
+
+
+# In[ ]:
+
+
+pickle.dump((mean, std_err), open(results_dir + acquisition_name + "_" + objective_name + "_" + "mean_sem.p", "wb"))
 
