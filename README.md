@@ -52,7 +52,7 @@ python experiments/MPES/MPES_Forr.py
 ```
 
 ## Results
-The results of the mean and standard error across all runs of immediate regret at each timestep are stored in the same directory as the experiment notebook/script, in the results directory. For example, to access the results after running the experiment on the Forrester test function using MPES:
+The results of the mean and standard error across all runs of immediate regret at each timestep are stored in the same directory as the experiment notebook/script, in the results directory as both text and pickle files. For example, to access the results after running the experiment on the Forrester test function using MPES:
 ```
 vim experiments/MPES/results/MPES_Forr/MPES_Forr_mean_sem.txt
 ```
