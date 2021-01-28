@@ -25,8 +25,9 @@ import pickle
 from gpflow.utilities import set_trainable, print_summary
 gpflow.config.set_default_summary_fmt("notebook")
 
-sys.path.append(os.path.split(os.path.split(os.path.split(os.getcwd())[0])[0])[0]) # Move 3 levels up directory to import PBO
-import PBO
+sys.path.append(os.path.split(os.path.split(os.path.split(os.getcwd())[0])[0])[0]) # Move 3 levels up directory to import project files as module
+import importlib
+PBO = importlib.import_module("Top-k-Ranking-Bayesian-Optimization")
 
 
 # In[ ]:
